@@ -311,6 +311,19 @@ python -m servers.network_voice_server \
 
 Leave this terminal running.
 
+Run the server from the project directory:
+
+```bash
+cd /home/pi/Vosk_Project
+python3 -m servers.network_voice_server
+```
+
+Direct execution is also supported:
+
+```bash
+python3 servers/network_voice_server.py
+```
+
 ### Run the Python client on the laptop
 
 Install Python and `sounddevice` on the laptop. On Windows, run the following
@@ -395,6 +408,14 @@ To process every WAV file in a folder:
 python -m tests.audio_led_tester \
     --audio-folder /home/pi/Vosk_Project/audio \
     --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15
+```
+
+The tester can also be launched directly:
+
+```bash
+cd /home/pi/Vosk_Project
+python3 tests/audio_led_tester.py \
+    --audio-folder /home/pi/Vosk_Project/audio
 ```
 
 Use `--hold-delay 0` and `--inter-file-delay 0` for a faster test. The tester

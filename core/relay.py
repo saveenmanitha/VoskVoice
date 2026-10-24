@@ -16,7 +16,7 @@ class RelayModule:
         self.pin = pin
         self.device = OutputDevice(
             pin,
-            active_high=not active_low,
+            active_high= False,
             initial_value=False,
         )
 

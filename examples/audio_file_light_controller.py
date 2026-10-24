@@ -29,7 +29,7 @@ DISPLAY_HOLD_DELAY = 3.0   # How long status lights (Red/Yellow) stay lit after 
 INTER_FILE_DELAY = 1.0     # Cooldown pause between audio files
 
 # Raspberry Pi paths
-MODEL_PATH = "/home/pi/VOSK/model"
+MODEL_PATH = "/home/pi/Vosk_Project/vosk-model-small-en-us-0.15"
 AUDIO_FOLDER = "/home/pi/Vosk_Project/audio"
 
 

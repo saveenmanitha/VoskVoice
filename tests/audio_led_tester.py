@@ -11,6 +11,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# Allow this file to be run directly with `python tests/...py`.
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from core.command_parser import check_light_command
 from core.transcriber import VoskAudioTranscriber
 from core.relay import RelayModule

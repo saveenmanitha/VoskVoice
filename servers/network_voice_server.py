@@ -10,7 +10,11 @@ import sys
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
+
+# Allow this file to be run directly with `python servers/...py`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.command_parser import check_light_command
 from core.relay import RelayModule
