@@ -229,7 +229,15 @@ python -m sounddevice
 Start the controller:
 
 ```bash
+cd /home/pi/Vosk_Project
 python -m examples.live_microphone_controller
+```
+
+Run it from the project directory. This is important because `core` is a
+project package. The controller also supports direct execution:
+
+```bash
+python examples/live_microphone_controller.py
 ```
 
 Speak one of the supported commands:

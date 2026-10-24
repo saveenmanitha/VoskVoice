@@ -1,6 +1,13 @@
 import os
+import sys
 import time
+from pathlib import Path
+
 from gpiozero import LED
+
+# Allow this file to be run directly with `python examples/...py`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from core.transcriber import VoskAudioTranscriber
 from core.relay import RelayModule
 
