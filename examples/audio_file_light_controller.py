@@ -2,6 +2,7 @@ import os
 import time
 from gpiozero import LED
 from core.transcriber import VoskAudioTranscriber
+from core.relay import RelayModule
 
 # ==========================================
 # GPIO PIN CONFIGURATION (BCM Numbers)
@@ -9,10 +10,12 @@ from core.transcriber import VoskAudioTranscriber
 RED_PIN = 17      # Error: File missing, corrupt, or wrong format
 YELLOW_PIN = 27   # Warning: No speech recognized OR unrecognized command
 GREEN_PIN = 22    # Command: Turns ON/OFF based on voice commands
+RELAY_PIN = 23    # Relay module input for the 12 V light strip
 
 red_led = LED(RED_PIN)
 yellow_led = LED(YELLOW_PIN)
 green_led = LED(GREEN_PIN)
+relay = RelayModule(RELAY_PIN)
 
 # Delays in seconds
 DISPLAY_HOLD_DELAY = 3.0   # How long status lights (Red/Yellow) stay lit after processing
@@ -114,6 +117,7 @@ def handle_file(transcriber: VoskAudioTranscriber, file_path: str):
 
     if command == "ON":
         green_led.on()
+        relay.on()
         yellow_led.off()
         red_led.off()
         print(f"  [STATUS] -> 🟢 GREEN LIGHT TOGGLED: ON")
@@ -123,6 +127,7 @@ def handle_file(transcriber: VoskAudioTranscriber, file_path: str):
 
     elif command == "OFF":
         green_led.off()
+        relay.off()
         yellow_led.off()
         red_led.off()
         print(f"  [STATUS] -> ⚪ GREEN LIGHT TOGGLED: OFF")
@@ -192,7 +197,9 @@ if __name__ == "__main__":
         red_led.off()
         yellow_led.off()
         green_led.off()
+        relay.off()
         red_led.close()
         yellow_led.close()
         green_led.close()
+        relay.close()
         print("[SHUTDOWN] GPIO resources released cleanly.")

@@ -33,9 +33,12 @@ function updateState(result) {
   document.querySelector("#command").textContent = result.command;
   document.querySelector("#response").textContent = result.message;
   const lightOn = Boolean(result.light_on);
+  const relayOn = Boolean(result.relay_on);
   const statusOn = Boolean(result.status_led_on);
   document.querySelector("#light-state").classList.toggle("on", lightOn);
   document.querySelector("#light-label").textContent = lightOn ? "ON" : "OFF";
+  document.querySelector("#relay-state").classList.toggle("on", relayOn);
+  document.querySelector("#relay-label").textContent = relayOn ? "ON" : "OFF";
   document.querySelector("#status-led-state").classList.toggle("on", statusOn);
   document.querySelector("#status-led-label").textContent = statusOn ? "ON (unrecognized command)" : "OFF";
 }

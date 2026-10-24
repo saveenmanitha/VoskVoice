@@ -13,6 +13,7 @@ from io import BytesIO
 from typing import Optional
 
 from core.command_parser import check_light_command
+from core.relay import RelayModule
 
 
 class VoiceCommandServer:
@@ -23,6 +24,7 @@ class VoiceCommandServer:
         yellow_pin: int = 27,
         active_low: bool = False,
         max_audio_bytes: int = 2_000_000,
+        relay_pin: int = 23,
     ) -> None:
         try:
             from gpiozero import LED
@@ -38,9 +40,11 @@ class VoiceCommandServer:
         SetLogLevel(-1)
         self.max_audio_bytes = max_audio_bytes
         self.model = Model(model_path)
-        self.light = LED(light_pin, active_high=not active_low)
+        self.light = LED(light_pin)
+        self.relay = RelayModule(relay_pin, active_low=active_low)
         self.yellow_led = LED(yellow_pin)
         self.light.off()
+        self.relay.off()
         self.yellow_led.off()
         self._recognizer_type = KaldiRecognizer
 
@@ -60,9 +64,11 @@ class VoiceCommandServer:
         command = check_light_command(transcript)
         if command == "ON":
             self.light.on()
+            self.relay.on()
             self.yellow_led.off()
         elif command == "OFF":
             self.light.off()
+            self.relay.off()
             self.yellow_led.off()
         else:
             self.yellow_led.on()
@@ -76,6 +82,7 @@ class VoiceCommandServer:
             "transcript": transcript,
             "command": command,
             "light_on": self.light.is_active,
+            "relay_on": self.relay.is_on,
             "status_led_on": self.yellow_led.is_active,
             "message": {
                 "ON": "Light turned on",
@@ -86,8 +93,10 @@ class VoiceCommandServer:
 
     def close(self) -> None:
         self.light.off()
+        self.relay.off()
         self.yellow_led.off()
         self.light.close()
+        self.relay.close()
         self.yellow_led.close()
 
 
@@ -158,6 +167,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0", help="Interface to listen on")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--light-pin", type=int, default=22)
+    parser.add_argument("--relay-pin", type=int, default=23)
     parser.add_argument(
         "--yellow-pin",
         type=int,
@@ -178,6 +188,7 @@ def main() -> int:
             arguments.light_pin,
             arguments.yellow_pin,
             arguments.active_low,
+            relay_pin=arguments.relay_pin,
         )
         server = ThreadingHTTPServer(
             (arguments.host, arguments.port), make_handler(controller)

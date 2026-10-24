@@ -1,6 +1,6 @@
 # Offline Voice-Controlled Light for Raspberry Pi
 
-Control an LED or a low-voltage relay with spoken commands. Speech recognition
+Control a green status LED and a 12 V DC light strip through a relay with spoken commands. Speech recognition
 is performed locally with [Vosk](https://alphacephei.com/vosk/), so the project
 does not need a cloud account or an internet connection after the software and
 model have been installed.
@@ -72,7 +72,7 @@ send recorded audio to an online service.
 | Raspberry Pi | Pi 3B+, Pi 4, or Pi 5 |
 | Power supply | The correct official or suitable supply for your Pi |
 | Microphone | USB microphone or USB audio adapter |
-| Output | An LED and 220-330 ohm resistor, or a suitable 5 V relay module |
+| Output | A green LED with a 220-330 ohm resistor and a relay module suitable for the strip |
 | Wiring | Breadboard and female-to-female/male-to-female jumper wires |
 
 For the first test, use a single LED. Add a relay only after the software and
@@ -93,23 +93,45 @@ The examples use **BCM GPIO numbering**, not physical pin numbers.
 | LED circuit connection | Raspberry Pi |
 | --- | --- |
 | GPIO control wire | **GPIO 22**, physical pin 15 |
-| GPIO 22 -> resistor -> LED anode (+, long leg) | In series |
+| GPIO 22 -> 220-330 ohm resistor -> LED anode (+, long leg) | In series |
 | LED cathode (-, short leg) | Any Pi GND, for example physical pin 6 |
 
-The resistor is required. Never connect an LED directly between a GPIO pin and
-ground.
+The resistor is required. Do **not** connect the green LED anode directly to
+the Pi's 3.3 V pin if you want software control: that would leave it
+permanently powered and bypass the GPIO logic. The GPIO drives the LED through
+the resistor, and the cathode returns to Pi GND. Never connect an LED directly
+between a GPIO pin and ground.
 
 ### Relay module circuit
 
 | Relay pin | Raspberry Pi |
 | --- | --- |
-| `IN` / `SIG` | **GPIO 22**, physical pin 15 |
+| `IN` / `SIG` | **GPIO 23**, physical pin 16 |
 | `GND` | Pi GND, for example physical pin 6 |
 | `VCC` | Module-rated supply, commonly 5 V from physical pin 2 or 4 |
 
-Some relay boards are **active-low**: they switch on when the GPIO output is
-LOW. Use the `--active-low` option for those boards. Check the relay board
-documentation before connecting it.
+The new `core/relay.py` `RelayModule` class owns relay on/off and cleanup
+operations. Every supported ON command now turns on both GPIO 22 (green LED)
+and GPIO 23 (relay); every supported OFF command turns both off. Some relay
+boards are **active-low**: they switch on when the GPIO output is LOW. Use the
+`--active-low` option for those boards. Check the relay board documentation
+before connecting it.
+
+### 12 V DC strip through the relay contacts
+
+Use the relay contacts to switch the strip's separate 12 V supply. Do not
+connect 12 V to any Raspberry Pi pin.
+
+| Connection | Wiring |
+| --- | --- |
+| 12 V supply positive | Relay `COM` |
+| Relay `NO` (normally open) | Strip positive (`+`) |
+| Strip negative (`-`) | 12 V supply negative |
+| Relay `NC` | Leave disconnected unless normally-on behavior is specifically required |
+
+This keeps the strip off until the relay is energized. Confirm that the relay
+contact voltage/current rating is greater than the strip's requirements, and
+use an appropriate fuse and wire gauge for the strip.
 
 The optional network server and recorded-file tester use a status LED on
 **GPIO 27** (physical pin 13) by default. Connect that LED in the same way as
@@ -263,7 +285,8 @@ python -m servers.network_voice_server
 The server listens on all network interfaces at port `8765`. The default
 hardware connections are:
 
-- Light/relay: BCM GPIO 22
+- Green LED: BCM GPIO 22
+- Relay input: BCM GPIO 23
 - Yellow status LED: BCM GPIO 27
 
 Useful server options:
@@ -273,6 +296,7 @@ python -m servers.network_voice_server \
     --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15 \
     --port 8765 \
     --light-pin 22 \
+    --relay-pin 23 \
     --yellow-pin 27 \
     --active-low
 ```
@@ -328,8 +352,8 @@ Chrome, Edge, or Firefox browser with microphone permission.
 6. Allow microphone access, select **Start recording**, speak a command, and
    select **Stop recording**.
 
-The page shows the transcript, action, response, light state, and yellow
-status-LED state. Serving the page from `localhost` is recommended because
+The page shows the transcript, action, response, green LED/strip state, relay
+state, and yellow status-LED state. Serving the page from `localhost` is recommended because
 browsers commonly block microphone access from a `file://` page or an
 unsecured remote page.
 
@@ -366,8 +390,9 @@ python -m tests.audio_led_tester \
 ```
 
 Use `--hold-delay 0` and `--inter-file-delay 0` for a faster test. The tester
-uses GPIO 17 for errors, GPIO 27 for warnings/unrecognized speech, and GPIO 22
-for the light state. It turns all LEDs off when it exits.
+uses GPIO 17 for errors, GPIO 27 for warnings/unrecognized speech, GPIO 22
+for the green light state, and GPIO 23 for the relay. It turns the LEDs and
+relay off when it exits.
 
 For transcription-only development, inspect
 `tests/voice_transcription_test.py` and `core/transcriber.py`; these do not
@@ -381,7 +406,8 @@ All GPIO arguments use BCM numbering:
 
 ```bash
 python -m examples.live_microphone_controller --light-pin 22
-python -m servers.network_voice_server --light-pin 22 --yellow-pin 27
+python -m examples.live_microphone_controller --light-pin 22 --relay-pin 23
+python -m servers.network_voice_server --light-pin 22 --relay-pin 23 --yellow-pin 27
 ```
 
 Use `--active-low` only when the relay documentation says that LOW activates

@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from core.command_parser import check_light_command
 from core.transcriber import VoskAudioTranscriber
+from core.relay import RelayModule
 
 
 class AudioLedTester:
@@ -21,6 +22,7 @@ class AudioLedTester:
     RED_PIN = 17
     YELLOW_PIN = 27
     GREEN_PIN = 22
+    RELAY_PIN = 23
 
     def __init__(
         self,
@@ -28,6 +30,7 @@ class AudioLedTester:
         display_hold_delay: float = 3.0,
         inter_file_delay: float = 1.0,
         led_factory: Optional[Callable[[int], Any]] = None,
+        relay: Optional[RelayModule] = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if display_hold_delay < 0 or inter_file_delay < 0:
@@ -50,6 +53,7 @@ class AudioLedTester:
         self.red_led = led_factory(self.RED_PIN)
         self.yellow_led = led_factory(self.YELLOW_PIN)
         self.green_led = led_factory(self.GREEN_PIN)
+        self.relay = relay or RelayModule(self.RELAY_PIN)
         self.reset_leds()
 
     def reset_leds(self) -> None:
@@ -57,6 +61,7 @@ class AudioLedTester:
         self.red_led.off()
         self.yellow_led.off()
         self.green_led.off()
+        self.relay.off()
 
     def close(self) -> None:
         """Leave the GPIO pins safe and release their resources."""
@@ -64,6 +69,7 @@ class AudioLedTester:
         self.red_led.close()
         self.yellow_led.close()
         self.green_led.close()
+        self.relay.close()
 
     def check_light_command(self, text: str) -> str:
         """Return ``ON``, ``OFF``, or ``UNKNOWN`` for transcribed speech."""
@@ -113,12 +119,14 @@ class AudioLedTester:
 
         if command == "ON":
             self.green_led.on()
+            self.relay.on()
             self.yellow_led.off()
             self.red_led.off()
             print("  [STATUS] -> GREEN LIGHT TOGGLED: ON")
             print("  [ACTION] -> Command matched: 'turn on'")
         elif command == "OFF":
             self.green_led.off()
+            self.relay.off()
             self.yellow_led.off()
             self.red_led.off()
             print("  [STATUS] -> GREEN LIGHT TOGGLED: OFF")

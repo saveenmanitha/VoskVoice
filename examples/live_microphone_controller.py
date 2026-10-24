@@ -10,6 +10,7 @@ import sys
 from typing import Optional
 
 from core.command_parser import check_light_command
+from core.relay import RelayModule
 
 
 class LiveVoiceLightController:
@@ -22,6 +23,7 @@ class LiveVoiceLightController:
         sample_rate: int = 16000,
         device: Optional[int] = None,
         active_low: bool = False,
+        relay_pin: int = 23,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be greater than zero")
@@ -54,8 +56,10 @@ class LiveVoiceLightController:
         self.sample_rate = sample_rate
         self.device = device
         self.recognizer = KaldiRecognizer(Model(model_path), sample_rate)
-        self.light = LED(light_pin, active_high=not active_low)
+        self.light = LED(light_pin)
+        self.relay = RelayModule(relay_pin, active_low=active_low)
         self.light.off()
+        self.relay.off()
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:
         if status:
@@ -66,9 +70,11 @@ class LiveVoiceLightController:
         command = check_light_command(transcript)
         if command == "ON":
             self.light.on()
+            self.relay.on()
             print("  [ACTION] Light ON")
         elif command == "OFF":
             self.light.off()
+            self.relay.off()
             print("  [ACTION] Light OFF")
         else:
             print("  [ACTION] Ignored: not an ON/OFF light command")
@@ -97,7 +103,9 @@ class LiveVoiceLightController:
     def close(self) -> None:
         """Turn the actuator off and release GPIO resources."""
         self.light.off()
+        self.relay.off()
         self.light.close()
+        self.relay.close()
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -114,6 +122,12 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=22,
         help="BCM GPIO pin connected to the LED/relay input (default: 22)",
+    )
+    parser.add_argument(
+        "--relay-pin",
+        type=int,
+        default=23,
+        help="BCM GPIO pin connected to the relay input (default: 23)",
     )
     parser.add_argument(
         "--sample-rate",
@@ -142,6 +156,7 @@ def main() -> int:
         controller = LiveVoiceLightController(
             model_path=arguments.model,
             light_pin=arguments.light_pin,
+            relay_pin=arguments.relay_pin,
             sample_rate=arguments.sample_rate,
             device=arguments.device,
             active_low=arguments.active_low,
