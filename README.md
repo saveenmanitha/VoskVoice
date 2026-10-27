@@ -1,188 +1,338 @@
-# Offline Voice-Controlled Light for Raspberry Pi
+# 🎙️ Offline Voice-Controlled Light & Appliance System for Raspberry Pi
 
-Control a green status LED and a 12 V DC light strip through a relay with spoken commands. Speech recognition
-is performed locally with [Vosk](https://alphacephei.com/vosk/), so the project
-does not need a cloud account or an internet connection after the software and
-model have been installed.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.9+">
+  <img src="https://img.shields.io/badge/Raspberry%20Pi-GPIO%20Zero-C51A4A?style=for-the-badge&logo=raspberry-pi&logoColor=white" alt="Raspberry Pi">
+  <img src="https://img.shields.io/badge/Speech%20Engine-Vosk%20Kaldi%20STT-FF6F00?style=for-the-badge" alt="Vosk STT">
+  <img src="https://img.shields.io/badge/Privacy-100%25%20Offline-success?style=for-the-badge" alt="100% Offline">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge" alt="License">
+</p>
 
-This repository includes three ways to send a command:
+A secure, high-performance, and **100% offline** voice-controlled smart lighting and appliance controller powered by a Raspberry Pi and [Vosk](https://alphacephei.com/vosk/) Kaldi speech recognition. Control status LEDs and a 12V DC light strip (or AC appliance) via a relay using spoken voice commands or an ultra-sleek, responsive glassmorphic web dashboard.
 
-1. **Pi microphone (recommended first setup):** the microphone, recognition
-   model, and GPIO output all run on the Raspberry Pi.
-2. **Laptop microphone over a local network:** the laptop records audio and the
-   Pi performs recognition and controls the light.
-3. **Browser interface:** a browser records audio and sends it to the same Pi
-   server. This is the easiest option for users who do not want to install a
-   microphone client on the laptop.
+No external cloud APIs, no subscriptions, and zero audio ever leaves your private local network.
 
-The project recognizes dozens of versatile command phrases, conversational sentences, and common phonetic variations, such as `turn on the light`, `turn off the light`, `lights on`, `lights out`, `kill the lights`, `goodnight`, `switch on`, `power down`, `illuminate`, and `activate relay`.
+---
 
-## Contents
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 1: HERO DEMO GIF / VIDEO BANNER                       -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/demo_hero.gif">
+    <img src="docs/images/demo_hero.gif" alt="Offline Voice Control System in Action" width="850">
+  </a>
+  <p>
+    <em>🎥 <b>Media Placeholder:</b> <code>docs/images/demo_hero.gif</code><br>
+    <b>Suggested content:</b> Animated GIF showing end-to-end voice control in action &mdash; user speaking "Turn on the light" into the web interface, the audio waveform reacting, and the physical Raspberry Pi relay and green LED switching on.</em>
+  </p>
+</div>
 
-- [How the system works](#how-the-system-works)
-- [Hardware](#hardware)
-- [Hardware wiring](#hardware-wiring)
-- [Software requirements](#software-requirements)
-- [Installation on the Raspberry Pi](#installation-on-the-raspberry-pi)
-- [Choose an operating mode](#choose-an-operating-mode)
-- [Mode 1: Pi microphone](#mode-1-pi-microphone)
-- [Mode 2: Laptop microphone over the network](#mode-2-laptop-microphone-over-the-network)
-- [Mode 3: Browser interface](#mode-3-browser-interface)
-- [Testing recorded WAV files](#testing-recorded-wav-files)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Safety](#safety)
-- [Project layout](#project-layout)
+---
 
-## How the system works
+## 📑 Table of Contents
+
+- [Key Features](#-key-features)
+- [System Architecture](#-system-architecture)
+- [Web Client Interface Tour](#-web-client-interface-tour)
+- [Raspberry Pi Voice Server](#-raspberry-pi-voice-server)
+- [Hardware Wiring & Circuit Diagram](#-hardware-wiring--circuit-diagram)
+- [Voice Commands & Phonetic Matcher](#-voice-commands--phonetic-matcher)
+- [Software Prerequisites & Installation](#-software-prerequisites--installation)
+- [Dynamic Vosk Model Auto-Discovery](#-dynamic-vosk-model-auto-discovery)
+- [Quick Start Guide](#-quick-start-guide)
+  - [1. Launch Raspberry Pi Voice Server](#1-start-the-voice-detection-server-raspberry-pi)
+  - [2. Launch Client Web Server](#2-start-the-client-web-server-laptop--pc--phone)
+  - [3. Accessing from Mobile Phones (HTTPS)](#3-mobile-phone-access-over-wi-fi-https)
+  - [4. Mock Development Mode](#4-mock-development-mode-no-pi-required)
+- [Testing & Diagnostics Suite](#-testing--diagnostics-suite)
+- [Standalone Raspberry Pi USB Microphone Mode](#-standalone-raspberry-pi-usb-microphone-mode)
+- [Project Directory Structure](#-project-directory-structure)
+- [Troubleshooting & FAQ](#-troubleshooting--faq)
+- [Media & Diagram Asset Checklist](#-media--diagram-asset-checklist)
+- [Safety & Electrical Guidelines](#-safety--electrical-guidelines)
+- [License](#-license)
+
+---
+
+## ✨ Key Features
+
+- **🔒 100% Offline & Private:** Real-time Kaldi speech recognition runs directly on the Raspberry Pi. Zero audio data is transmitted outside your local area network.
+- **⚡ Dual-Server Distributed Architecture:**
+  - **Raspberry Pi Voice Detection Server:** Handles speech transcription, phonetic synonym matching, GPIO relay/LED logic, and unified multi-client activity logging.
+  - **Client Web Server & LAN Reverse Proxy:** Hosts an ultra-modern glassmorphic web dashboard, records 16 kHz Mono WAV audio via Web Audio API, and reverse-proxies requests seamlessly.
+- **🧭 Dynamic Model Auto-Discovery:** Intelligent model path resolver (`core/model_resolver.py`) automatically discovers the Vosk Kaldi model in project, parent, or home folders without hardcoded paths.
+- **🎨 Modern Glassmorphic Web Client:**
+  - **Push-to-Talk & Spacebar Trigger:** Hold the microphone button or press `[Space]` to record.
+  - **Hands-Free Auto-Detect:** One-tap listening mode with intelligent Voice Activity Detection (VAD) and auto-silence cutoff.
+  - **Live Audio Waveform Visualizer:** Real-time canvas audio visualization responding dynamically to voice amplitude.
+  - **Instant GPIO Quick Actions:** Direct hardware bypass buttons (`Light ON` / `Light OFF`) for instantaneous switching without STT latency.
+  - **Live Hardware HUD & Multi-Device Activity Log:** Real-time pin state indicators and command history tracking connected client IP addresses.
+- **🛠️ Independent Hardware Diagnostics Suite:** Built-in `/diagnostics.html` page enabling individual pin toggles, pulse testing, and master overrides to verify LEDs and relay circuits.
+- **📱 Mobile HTTPS Support:** Built-in self-signed SSL certificate generation (`--ssl`) enabling microphone permissions (`getUserMedia`) across iPhones, iPads, and Android devices on the LAN.
+- **🧪 Automated Batch Testing Suite:** Built-in test runner (`tests/test_voice_commands.py`) with automatic mock GPIO fallback on non-Raspberry Pi machines.
+
+---
+
+## 🏛️ System Architecture
+
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 2: SYSTEM ARCHITECTURE DIAGRAM                        -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/system_architecture.png">
+    <img src="docs/images/system_architecture.png" alt="System Architecture Diagram" width="850">
+  </a>
+  <p>
+    <em>📐 <b>Diagram Placeholder:</b> <code>docs/images/system_architecture.png</code><br>
+    <b>Suggested content:</b> High-level block diagram showing the flow of audio from Web Audio API / Mobile Browser &rarr; Client Web Server (Reverse Proxy) &rarr; LAN HTTP POST &rarr; Raspberry Pi Voice Detection Server &rarr; Vosk STT Engine &rarr; Command Parser &rarr; GPIO Zero Pin Controller.</em>
+  </p>
+</div>
+
+### Data & Audio Flow Pipeline
 
 ```text
-Microphone
-   |
-   v
-16 kHz, mono, 16-bit PCM audio
-   |
-   v
-Vosk speech recognition (runs locally)
-   |
-   v
-Transcript -> command parser -> GPIO output
-                                  |
-                                  v
-                              LED or relay
+┌────────────────────────────────────────────────────────┐
+│      Client Device (Laptop / PC / iPhone / Android)    │
+│  - Web Audio API (16 kHz, 16-bit Mono PCM WAV)         │
+│  - Live Audio Waveform Canvas Visualizer               │
+│  - Push-to-Talk / Hands-Free VAD Silence Detection     │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            │ HTTP POST (Audio WAV or GPIO Action)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│     Client Web Server & LAN Proxy (:8080 / :8443)      │
+│  - Static Asset Delivery (HTML5 / Vanilla CSS / JS)    │
+│  - SSL / TLS Termination for Mobile Mic Permissions   │
+│  - API Reverse Proxy (/api/* -> Pi Server)             │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            │ LAN HTTP (:8765)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│        Raspberry Pi Voice Detection Server (:8765)     │
+│  ├── /audio   -> Receives WAV audio stream             │
+│  ├── /control -> Direct GPIO toggle bypass             │
+│  ├── /status  -> Live pin state polling                │
+│  └── /history -> Multi-client IP activity tracking     │
+└─────────────┬──────────────────────────┬───────────────┘
+              │                          │
+              ▼                          ▼
+┌───────────────────────────┐  ┌─────────────────────────┐
+│     Vosk Kaldi Engine     │  │   Command Parser &      │
+│  - Auto-Discovered Model  │  │   Phonetic Matcher      │
+│  - Offline Speech-to-Text │  │  - Synonyms & Aliases   │
+└───────────────────────────┘  └─────────────┬───────────┘
+                                             │
+                                             ▼
+                               ┌─────────────────────────┐
+                               │  Raspberry Pi Hardware  │
+                               │  - BCM 22: Green LED    │
+                               │  - BCM 23: 12V Relay    │
+                               │  - BCM 27: Yellow LED   │
+                               │  - BCM 17: Red Error    │
+                               └─────────────────────────┘
 ```
 
-The command parser returns one of three results:
+---
 
-- `ON`: the configured light output is activated.
-- `OFF`: the configured light output is deactivated.
-- `UNKNOWN`: speech was detected, but it was not a supported light command.
+## 🖥️ Web Client Interface Tour
 
-The supplied small English model is suitable for a Raspberry Pi and is already
-stored in `vosk-model-small-en-us-0.15/` in this repository. Vosk does not
-send recorded audio to an online service.
+The Client Web Server provides an intuitive, responsive glassmorphism interface with neon glow indicators, smooth micro-animations, and live feedback.
 
-## Hardware
+### 1. Main Voice Controller Dashboard (`/index.html`)
 
-### Required parts
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 3: CLIENT WEB SERVER MAIN DASHBOARD SCREENSHOT        -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/web_interface_main.png">
+    <img src="docs/images/web_interface_main.png" alt="Client Web Server Dashboard" width="850">
+  </a>
+  <p>
+    <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_interface_main.png</code><br>
+    <b>Suggested content:</b> Full browser screenshot of the primary dashboard at <code>/index.html</code> displaying the animated microphone button, live audio waveform visualizer, Hardware Status HUD (Green, Relay, Yellow, Red indicators), Direct GPIO Quick Action buttons, and the real-time activity feed.</em>
+  </p>
+</div>
 
-| Part | Recommendation |
-| --- | --- |
-| Raspberry Pi | Pi 3B+, Pi 4, or Pi 5 |
-| Power supply | The correct official or suitable supply for your Pi |
-| Microphone | USB microphone or USB audio adapter |
-| Output | A green LED with a 220-330 ohm resistor and a relay module suitable for the strip |
-| Wiring | Breadboard and female-to-female/male-to-female jumper wires |
+- **Audio Waveform Canvas:** Visualizes microphone sound levels in real time using the browser's Web Audio `AnalyserNode`.
+- **Flexible Recording Modes:** Toggle between **Push-to-Talk** (click & hold or spacebar) and **Hands-Free Auto-Detect** (records continuously and stops automatically upon detecting silence).
+- **Direct GPIO Quick Actions:** `Light ON` and `Light OFF` buttons allow immediate physical control without waiting for speech transcription.
+- **Hardware Status HUD:** Live polling lights display the instantaneous state of the Green LED, 12V Relay, Yellow Status LED, and Red Error LED.
+- **Multi-Device Activity Feed:** Displays recent commands, recognized speech strings, and client IP addresses.
 
-For the first test, use a single LED. Add a relay only after the software and
-GPIO wiring have been verified.
+---
 
-### Optional network-mode hardware
+### 2. Hardware Diagnostics Suite (`/diagnostics.html`)
 
-Network and browser modes still need the Raspberry Pi, output circuit, and
-power supply. The microphone can instead be connected to a laptop on the same
-local network.
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 4: HARDWARE DIAGNOSTICS SUITE SCREENSHOT              -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/web_diagnostics.png">
+    <img src="docs/images/web_diagnostics.png" alt="Hardware Diagnostics Interface" width="850">
+  </a>
+  <p>
+    <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_diagnostics.png</code><br>
+    <b>Suggested content:</b> Screenshot of the Diagnostics dashboard at <code>/diagnostics.html</code> showing independent pin toggle cards for BCM 22, BCM 23, BCM 27, and BCM 17, along with the "Test Pulse" and "Turn All ON / OFF" master controls.</em>
+  </p>
+</div>
 
-## Hardware wiring
+- **Individual Pin Controls:** Test each LED and relay independently without running voice commands.
+- **Test Pulse Button:** Sends a brief 500ms flash pulse to any component to verify circuit continuity.
+- **Master Overrides:** One-click `Turn All ON` and `Turn All OFF` buttons for rapid bench testing.
 
-The examples use **BCM GPIO numbering**, not physical pin numbers.
+---
 
-### Basic LED circuit
+### 3. Mobile Device Interface (Responsive & HTTPS)
 
-| LED circuit connection | Raspberry Pi |
-| --- | --- |
-| GPIO control wire | **GPIO 22**, physical pin 15 |
-| GPIO 22 -> 220-330 ohm resistor -> LED anode (+, long leg) | In series |
-| LED cathode (-, short leg) | Any Pi GND, for example physical pin 6 |
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 5: MOBILE RESPONSIVE VIEW OVER HTTPS                  -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/mobile_interface.png">
+    <img src="docs/images/mobile_interface.png" alt="Mobile Web Interface over HTTPS" width="450">
+  </a>
+  <p>
+    <em>📱 <b>Screenshot Placeholder:</b> <code>docs/images/mobile_interface.png</code><br>
+    <b>Suggested content:</b> Screenshot of the web client running on a mobile browser (iPhone Safari or Android Chrome) over LAN HTTPS (port 8443) demonstrating the responsive mobile layout and active microphone permission.</em>
+  </p>
+</div>
 
-The resistor is required. Do **not** connect the green LED anode directly to
-the Pi's 3.3 V pin if you want software control: that would leave it
-permanently powered and bypass the GPIO logic. The GPIO drives the LED through
-the resistor, and the cathode returns to Pi GND. Never connect an LED directly
-between a GPIO pin and ground.
+---
 
-### Relay module circuit
+## 🍓 Raspberry Pi Voice Server
 
-| Relay pin | Raspberry Pi |
-| --- | --- |
-| `IN` / `SIG` | **GPIO 23**, physical pin 16 |
-| `GND` | Pi GND, for example physical pin 6 |
-| `VCC` | Module-rated supply, commonly 5 V from physical pin 2 or 4 |
+The backend runs on the Raspberry Pi as a lightweight HTTP micro-service listening on port `8765`. It handles audio transcription, executes phonetic matching, interacts with the GPIO controller, and broadcasts status updates.
 
-The new `core/relay.py` `RelayModule` class owns relay on/off and cleanup
-operations. Every supported ON command now turns on both GPIO 22 (green LED)
-and GPIO 23 (relay); every supported OFF command turns both off. Some relay
-boards are **active-low**: they switch on when the GPIO output is LOW. Use the
-`--active-low` option for those boards. Check the relay board documentation
-before connecting it.
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 6: RASPBERRY PI VOICE SERVER TERMINAL CONSOLE         -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/voice_server_terminal.png">
+    <img src="docs/images/voice_server_terminal.png" alt="Raspberry Pi Voice Server Terminal Output" width="850">
+  </a>
+  <p>
+    <em>💻 <b>Screenshot Placeholder:</b> <code>docs/images/voice_server_terminal.png</code><br>
+    <b>Suggested content:</b> Terminal capture of <code>servers/voice_detection_server.py</code> executing on the Raspberry Pi: showing dynamic model resolution, server startup on <code>0.0.0.0:8765</code>, audio receipt from client IP, Vosk recognition output, command parsing, and GPIO pin actuation logs.</em>
+  </p>
+</div>
 
-### 12 V DC strip through the relay contacts
+### REST API Endpoints
 
-Use the relay contacts to switch the strip's separate 12 V supply. Do not
-connect 12 V to any Raspberry Pi pin.
+| Endpoint | Method | Payload / Parameters | Description |
+|---|---|---|---|
+| `/audio` | `POST` | Raw 16 kHz WAV audio file | Transcribes audio via Vosk, parses command, and triggers GPIO actuation. |
+| `/control` | `POST` | `{"action": "light_on" \| "light_off" \| "toggle"}` | Bypasses STT to actuate GPIO relay and Green LED instantly. |
+| `/status` | `GET` | _None_ | Returns real-time JSON state of all pins (`light`, `relay`, `yellow`, `red`). |
+| `/history` | `GET` | `?limit=20` | Returns recent command execution log including timestamp and client IP. |
 
-| Connection | Wiring |
-| --- | --- |
-| 12 V supply positive | Relay `COM` |
-| Relay `NO` (normally open) | Strip positive (`+`) |
-| Strip negative (`-`) | 12 V supply negative |
-| Relay `NC` | Leave disconnected unless normally-on behavior is specifically required |
+---
 
-This keeps the strip off until the relay is energized. Confirm that the relay
-contact voltage/current rating is greater than the strip's requirements, and
-use an appropriate fuse and wire gauge for the strip.
+## 🔌 Hardware Wiring & Circuit Diagram
 
-The optional network server and recorded-file tester use a status LED on
-**GPIO 27** (physical pin 13) by default. Connect that LED in the same way as
-the first LED, with its own resistor. The recorded-file tester also uses GPIO
-17 (physical pin 11) for its red error LED and GPIO 22 (physical pin 15) for
-its green/light LED.
+The Raspberry Pi drives three status LEDs and an optocoupled relay module configured to control an external 12V DC power circuit.
 
-## Software requirements
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 7: CIRCUIT WIRING DIAGRAM (FRITZING / SCHEMATIC)      -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/circuit_wiring_diagram.png">
+    <img src="docs/images/circuit_wiring_diagram.png" alt="Circuit Wiring Diagram" width="850">
+  </a>
+  <p>
+    <em>⚡ <b>Diagram Placeholder:</b> <code>docs/images/circuit_wiring_diagram.png</code><br>
+    <b>Suggested content:</b> Detailed Fritzing breadboard illustration or electronic schematic diagram showing connections between the Raspberry Pi 40-pin header, 220Ω/330Ω current-limiting resistors, Green/Yellow/Red LEDs, Relay module input, 12V external power supply, and 12V LED light strip.</em>
+  </p>
+</div>
 
-- Raspberry Pi OS with Python 3.9 or newer
-- A working USB microphone for local microphone mode
-- A laptop and Raspberry Pi on the same LAN for network or browser mode
-- Internet access only for the initial package/model download
+<!-- ================================================================= -->
+<!-- PLACEHOLDER 8: PHYSICAL HARDWARE BENCH SETUP PHOTO               -->
+<!-- ================================================================= -->
+<div align="center">
+  <a href="docs/images/hardware_setup_photo.png">
+    <img src="docs/images/hardware_setup_photo.png" alt="Physical Hardware Setup Photo" width="850">
+  </a>
+  <p>
+    <em>📷 <b>Photo Placeholder:</b> <code>docs/images/hardware_setup_photo.png</code><br>
+    <b>Suggested content:</b> High-resolution photograph of the actual physical hardware assembly on a breadboard or custom project enclosure, showing the Raspberry Pi, relay board, wiring jumpers, status LEDs, and light strip.</em>
+  </p>
+</div>
 
-The network server is intentionally a small HTTP service for a trusted home
-LAN. It does not provide authentication or HTTPS encryption.
+### GPIO Pinout Reference Table
 
-## Installation on the Raspberry Pi
+All GPIO pin references use standard Broadcom (BCM) numbering:
 
-Run these commands in a terminal on the Pi:
+| Component | BCM Pin | Physical Pin | Recommended Wiring | Functional Purpose |
+|---|---|---|---|---|
+| 🟢 **Green Command LED** | `GPIO 22` | Pin 15 | In series with a 220Ω – 330Ω resistor to GND | Illuminates when the light is switched **ON** |
+| ⚡ **12V Relay Module** | `GPIO 23` | Pin 16 | Signal (IN) pin; VCC to 5V (Pin 2/4), GND to Pin 6 | Switches external 12V DC power to LED strip |
+| 🟡 **Yellow Status LED** | `GPIO 27` | Pin 13 | In series with a 220Ω – 330Ω resistor to GND | Blinks when speech is recognized but unmapped |
+| 🔴 **Red Error LED** | `GPIO 17` | Pin 11 | In series with a 220Ω – 330Ω resistor to GND | Flashes on malformed audio or server error |
+| ⏚ **Common Ground (GND)** | `GND` | Pin 6, 9, 14, 20, 25 | Connected to breadboard negative ground rail | Shared ground reference for all LEDs and relay |
+
+> [!IMPORTANT]
+> **Electrical Safety Notice:**
+> - **Never connect 12V directly to any Raspberry Pi pin!** Raspberry Pi GPIO operates strictly at **3.3V logic** (5V tolerant power rails only on dedicated pins).
+> - Always power the 12V LED strip from an **isolated external 12V DC power supply**. Connect the external power supply positive lead through the relay's **Common (COM)** and **Normally Open (NO)** terminals.
+> - Ensure your relay module includes an optocoupler and flyback diode protection to suppress inductive kickback.
+
+---
+
+## 🗣️ Voice Commands & Phonetic Matcher
+
+The command parser (`core/command_parser.py`) normalizes speech strings and evaluates spoken phrases using a resilient phonetic synonym matcher:
+
+| Target Action | Recognized Spoken Phrases & Aliases | Hardware Reaction |
+|---|---|---|
+| **Turn ON** | `"light on"`, `"lights on"`, `"turn on"`, `"turn on the light"`, `"turn on the lights"`, `"turn the light on"`, `"turn on light"`, `"switch on"`, `"activate"`, `"lamp on"` | 🟢 Green LED ON<br>⚡ Relay ON (12V strip energizes) |
+| **Turn OFF** | `"light off"`, `"lights off"`, `"turn off"`, `"turn off the light"`, `"turn off the lights"`, `"turn the light off"`, `"turn off light"`, `"switch off"`, `"deactivate"`, `"lamp off"` | 🟢 Green LED OFF<br>⚡ Relay OFF (12V strip powers down) |
+| **Unknown Speech** | Any audible spoken phrase not matching above (e.g., `"hello"`, `"what is the weather"`) | 🟡 Yellow Status LED pulses for 1.2s |
+| **Audio / Engine Error** | Empty audio stream, corrupted WAV header, or transcription failure | 🔴 Red Error LED flashes |
+
+---
+
+## 📦 Software Prerequisites & Installation
+
+### 1. Raspberry Pi Setup
+
+- **Operating System:** Raspberry Pi OS (Bullseye, Bookworm, or later).
+- **Python:** Version 3.9 or higher.
+
+Install required system and Python dependencies:
 
 ```bash
-sudo apt update
-sudo apt install -y git python3-pip python3-venv python3-dev \
-    portaudio19-dev libasound2-dev unzip
-```
+# Update package indices
+sudo apt update && sudo apt install -y python3-pip python3-venv git
 
-Clone the project:
-
-```bash
+# Clone repository
 git clone https://github.com/saveenmanitha/Vosk_Project.git
 cd Vosk_Project
+
+# Install Python packages
+pip3 install vosk gpiozero
 ```
 
-Create and activate a virtual environment:
+### 2. Client Machine Setup (Laptop / PC / Mac)
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+- **Python:** Version 3.9 or higher (standard library is sufficient for `client_web_server.py`).
+- **OpenSSL:** *(Optional)* Used for automatically generating self-signed HTTPS certificates when running with `--ssl`.
 
-Install the Python packages used by the project:
+---
 
-```bash
-python -m pip install --upgrade pip
-python -m pip install vosk gpiozero sounddevice
-```
+## 🧠 Dynamic Vosk Model Auto-Discovery
 
-### Install the Vosk model
+Traditional scripts often break when repositories are cloned into different user directories due to hardcoded model paths. 
 
-The repository already contains `vosk-model-small-en-us-0.15/`. If that folder
-is missing, download it from the Vosk model page:
+This project includes an intelligent path discovery module (`core/model_resolver.py`):
+1. **Repository Root:** Automatically searches for `vosk-model-small-en-us-0.15` (or any `vosk-model*` directory) inside the project folder.
+2. **User Home Directory:** Checks `~/vosk-model*` or parent directories.
+3. **Environment Variable:** Checks `VOSK_MODEL_PATH` if defined.
+4. **Command-Line Override:** You can always specify an explicit path via `--model /custom/path`.
+
+### Downloading the Vosk Model (If Not Included)
+
+If the lightweight English model (`~40 MB`) is not already in your cloned folder:
 
 ```bash
 wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
@@ -190,472 +340,248 @@ unzip vosk-model-small-en-us-0.15.zip
 rm vosk-model-small-en-us-0.15.zip
 ```
 
-Confirm that the model directory contains folders such as `am`, `conf`,
-`graph`, and `ivector`:
+The dynamic resolver detects it immediately upon launch.
 
-```text
-Vosk_Project/
-└── vosk-model-small-en-us-0.15/
-    ├── am/
-    ├── conf/
-    ├── graph/
-    └── ivector/
-```
+---
 
-The command examples below assume the repository is located at
-`/home/pi/Vosk_Project`. If it is somewhere else, pass the full path with
-`--model`.
+## 🚀 Quick Start Guide
 
-## Choose an operating mode
+### 1. Start the Voice Detection Server (Raspberry Pi)
 
-| Mode | Microphone location | Main command |
-| --- | --- | --- |
-| Pi microphone | Raspberry Pi | `python -m examples.live_microphone_controller` |
-| Laptop Python client | Laptop | `python -m clients.network_voice_client ...` |
-| Web Client (LAN / Any Device) | Smartphone / Tablet / Laptop | `python clients/web_server.py --pi http://<pi-ip>:8765` |
-
-Start with **Mode 1** to verify the GPIO circuit. Use **Mode 2** or **Mode 3**
-when the microphone must remain connected to a laptop or mobile devices on your Wi-Fi.
-
-## Mode 1: Pi microphone
-
-Connect the USB microphone to the Pi and list the available audio devices:
+SSH into your Raspberry Pi and start the voice server:
 
 ```bash
-python -m sounddevice
+cd Vosk_Project
+./start_voice_server.sh
 ```
 
-Start the controller:
+Or execute directly with Python:
 
 ```bash
-cd /home/pi/Vosk_Project
-python -m examples.live_microphone_controller
+python3 servers/voice_detection_server.py
 ```
 
-Run it from the project directory. This is important because `core` is a
-project package. The controller also supports direct execution:
+The server automatically loads the Vosk model and begins listening on `http://0.0.0.0:8765`.
 
+#### Optional Server CLI Flags:
 ```bash
-python examples/live_microphone_controller.py
+python3 servers/voice_detection_server.py \
+  --port 8765 \
+  --light-pin 22 \
+  --relay-pin 23 \
+  --yellow-pin 27 \
+  --red-pin 17 \
+  --active-low    # Use if your relay module energizes on active-low logic
 ```
 
-Speak one of the supported commands:
+---
 
-```text
-turn on the light
-turn off the light
-lights on
-lights off
-switch on
-switch off
-```
+### 2. Start the Client Web Server (Laptop / PC / Phone)
 
-The default output is BCM GPIO 22. Choose another GPIO pin, microphone device,
-or model with options:
+Launch the web client on your computer or the Raspberry Pi itself:
 
-```bash
-python -m examples.live_microphone_controller \
-    --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15 \
-    --light-pin 22 \
-    --device 2
-```
-
-For an active-low relay:
-
-```bash
-python -m examples.live_microphone_controller --active-low
-```
-
-Press `Ctrl+C` to stop. The program turns the output off and releases the GPIO
-resource during shutdown.
-
-## Mode 2: Laptop microphone over the network
-
-In this mode, the Pi runs the Vosk model and controls the GPIO. The laptop
-records a short command and sends a WAV file to the Pi over the local network.
-
-### Start the server on the Pi
-
-Find the Pi's local IP address:
-
-```bash
-hostname -I
-```
-
-Start the server from the project directory:
-
-```bash
-source .venv/bin/activate
-python -m servers.network_voice_server
-```
-
-The server listens on all network interfaces at port `8765`. The default
-hardware connections are:
-
-- Green LED: BCM GPIO 22
-- Relay input: BCM GPIO 23
-- Yellow status LED: BCM GPIO 27
-
-Useful server options:
-
-```bash
-python -m servers.network_voice_server \
-    --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15 \
-    --port 8765 \
-    --light-pin 22 \
-    --relay-pin 23 \
-    --yellow-pin 27 \
-    --active-low
-```
-
-Leave this terminal running.
-
-Run the server from the project directory:
-
-```bash
-cd /home/pi/Vosk_Project
-python3 -m servers.network_voice_server
-```
-
-Direct execution is also supported:
-
-```bash
-python3 servers/network_voice_server.py
-```
-
-### Run the Python client on the laptop
-
-Install Python and `sounddevice` on the laptop. On Windows, run the following
-in PowerShell; on Linux/macOS, use the equivalent Python commands:
-
-```bash
-python -m pip install sounddevice
-```
-
-From the repository folder on the laptop, replace the address below with the
-Pi address:
-
-```bash
-python -m clients.network_voice_client \
-    --server http://192.168.1.50:8765
-```
-
-The client waits for speech, detects approximately 0.8 seconds of silence,
-creates a mono 16-bit WAV file, and uploads it. Press `Ctrl+C` to stop.
-
-If the wrong microphone is selected, list devices and pass its number:
-
-```bash
-python -m sounddevice
-python -m clients.network_voice_client \
-    --server http://192.168.1.50:8765 \
-    --device 2
-```
-
-## Mode 3: Modern Web Client (Local Network & Mobile Access)
-
-The web client provides a modern, responsive interface accessible from **any device on your local Wi-Fi network** (smartphones, tablets, and other computers) to execute voice commands to the Raspberry Pi.
-
-It includes a dark-mode glassmorphism design, real-time hardware status indicators, live audio frequency visualizer, and **three intuitive voice execution methods** that eliminate the need to manually click start and stop:
-
-1. **🎙️ Hold-to-Talk (Push-to-Talk, Recommended):**
-   - Press and hold the microphone button (or hold the **Spacebar** on a keyboard) while speaking your command.
-   - Release the button/Spacebar when finished speaking: the audio is immediately encoded to 16 kHz mono 16-bit PCM WAV and sent to the Pi.
-2. **⚡ Auto-Detect (Voice Activity Detection / Hands-Free):**
-   - Tap the microphone button once to enter listening mode.
-   - Speak naturally: the client detects your voice, records the utterance, and automatically stops and dispatches the command as soon as you pause (~0.8s silence, matching the Python client).
-   - An optional **Continuous Listening** toggle in settings keeps listening for further commands.
-3. **⏺️ Tap-to-Toggle (Manual Start/Stop):**
-   - Tap once to begin recording and tap again when done.
-4. **⚡ Pure Direct GPIO Signals (100% Reliable Quick Actions):**
-   - One-tap buttons for `Light ON` and `Light OFF` that send a **pure direct electrical signal to the GPIO pins**, completely separated from the Vosk speech recognizer. This eliminates any possibility of "command not recognized" errors during manual quick testing.
-5. **🛠️ Hardware Diagnostics Page (`/test.html`):**
-   - A dedicated diagnostic test suite page that lets you **independently test each of the 3 LEDs and the Relay module**:
-     - **Green LED** (BCM GPIO 22 &bull; Pin 15) &mdash; Toggle ON/OFF or Pulse 1s
-     - **12V Relay Module** (BCM GPIO 23 &bull; Pin 16) &mdash; Toggle Contacts or Click Test
-     - **Yellow Status LED** (BCM GPIO 27 &bull; Pin 13) &mdash; Toggle ON/OFF or Blink 3x
-     - **Red Error LED** (BCM GPIO 17 &bull; Pin 11) &mdash; Toggle ON/OFF or Pulse 1s
-     - **Master Batch Suite** &mdash; All ON, All OFF, and an automated Sequential Cycle Test
-6. **🌐 Multi-Device Live Activity Feed:**
-   - The Command Activity feed on both pages receives **every command sent across all phones, tablets, and computers on your local Wi-Fi**, displaying the originating client IP address (e.g. `192.168.1.45`) next to each command in real time!
-7. **📖 Commands & Help Page (`/help.html`) & Interactive Help Modal:**
-   - **Dedicated Help Page (`/help.html`):** A complete reference manual for all voice commands, hardware pin configurations, mobile mic setup guides, and troubleshooting tips.
-   - **In-App Help Modal Window:** Accessible directly on the main controller via the **"📖 Example Phrases"** tab or **"Help & Phrases"** button. Tap any example phrase chip to instantly preview or copy the command!
-
-### Hosting the Web Client on Your Laptop
-
-You can host the web interface on your laptop so any device on your Wi-Fi network can access it through the laptop's local IP address.
-
-#### Option A: Quick Launch with Windows Batch Script
-Double-click `start_web_client.bat` in the project root, or run:
-
-```bat
+#### 🪟 Windows:
+Double-click `start_web_client.bat` or run:
+```cmd
 .\start_web_client.bat
 ```
 
-#### Option B: Standard HTTP Launch (Desktop Browsers)
-Run the dedicated client web server with the Pi's IP address:
+#### 🐧 Linux / macOS:
+```bash
+chmod +x ./start_web_client.sh
+./start_web_client.sh
+```
+
+#### 🐍 Python CLI:
+```bash
+# Standard HTTP (port 8080):
+python clients/client_web_server.py --pi http://<RASPBERRY_PI_IP>:8765
+
+# Custom web port:
+python clients/client_web_server.py --port 9000 --pi http://<RASPBERRY_PI_IP>:8765
+```
+
+---
+
+### 3. Mobile Phone Access over Wi-Fi (HTTPS)
+
+Modern mobile browsers (iOS Safari, Android Chrome) **block microphone access** on non-localhost IP addresses unless served over a secure **HTTPS** connection.
+
+Run the client server with the `--ssl` flag:
 
 ```bash
-python clients/web_server.py --pi http://192.168.1.50:8765
+python clients/client_web_server.py --pi http://<RASPBERRY_PI_IP>:8765 --ssl
 ```
 
-The server automatically detects your laptop's local LAN IP address and prints the exact URLs to open:
+1. The server automatically generates a local self-signed certificate in `certs/` and listens on port `8443`.
+2. On your smartphone, navigate to: `https://<YOUR_COMPUTER_IP>:8443`
+3. Accept the browser's one-time local self-signed certificate notice.
+4. Tap the microphone button &mdash; mobile voice recording works instantly!
 
-```text
-====================================================================
-  [*] VOSK PI VOICE CONTROLLER - LOCAL CLIENT WEB SERVER
-====================================================================
-  * Local Machine:   http://localhost:8080
-  * LAN Network:     http://192.168.1.13:8080
-  * Target Pi Server:http://192.168.1.50:8765
-  * Mode:            LIVE PROXY (Forwarding audio/status to Pi)
-====================================================================
-  [>] Navigation:
-  * Voice Controller:    http://192.168.1.13:8080/index.html
-  * Pin Control Suite:   http://192.168.1.13:8080/test.html
-  * Commands & Help:     http://192.168.1.13:8080/help.html
-====================================================================
-```
+---
 
-#### Option C: HTTPS Launch (Recommended for Mobile Devices)
-Mobile web browsers (iOS Safari, Android Chrome) enforce a strict security policy requiring a **Secure Context (HTTPS or localhost)** to allow microphone access (`navigator.mediaDevices.getUserMedia`).
+### 4. Mock Development Mode (No Pi Required)
 
-To record voice from an iPhone or Android phone over your local network, start the server with `--ssl`:
+Want to test or customize the web dashboard and pin diagnostics without a physical Raspberry Pi connected?
 
 ```bash
-python clients/web_server.py --pi http://192.168.1.50:8765 --ssl
+python clients/client_web_server.py --mock-pi
 ```
 
-- The server automatically generates a self-signed SSL certificate (`certs/cert.pem` and `certs/key.pem`) on first run.
-- On your phone or tablet, connect to your Wi-Fi and open `https://<laptop-ip>:8443` (e.g. `https://192.168.1.13:8443`).
-- When the browser displays the local self-signed certificate warning, tap **Advanced** &rarr; **Proceed to site**.
-- Microphone access will be fully enabled!
+Starts an internal simulated Raspberry Pi backend on port `8080` that realistically mocks pin states, speech recognition responses, and activity history.
 
-### Supported Voice Command Aliases & Phrases
+---
 
-The command parser (`core/command_parser.py`) incorporates a robust multi-layered recognition engine with 40+ aliases per action, phonetic speech variations, natural language filler tolerance, and negation protection:
+## 🧪 Testing & Diagnostics Suite
 
-| Command Type | Spoken Phrases & Aliases | Action Taken |
-| --- | --- | --- |
-| **Turn ON (Standard)** | `turn on the light`, `turn on lights`, `turn on the lights`, `lights on`, `light on` | Green LED HIGH, Relay CLOSED |
-| **Turn ON (Action Verbs)**| `switch on the light`, `power on the lights`, `power up`, `activate light`, `activate relay` | Green LED HIGH, Relay CLOSED |
-| **Turn ON (Colloquial)**| `put on the light`, `light up`, `illuminate`, `brighten`, `turn it on` | Green LED HIGH, Relay CLOSED |
-| **Turn ON (Phonetic)** | `the north`, `ten on`, `to non`, `lite on` (handles Vosk acoustic variants) | Green LED HIGH, Relay CLOSED |
-| **Turn OFF (Standard)** | `turn off the light`, `turn off lights`, `turn off the lights`, `lights off`, `light off` | Green LED LOW, Relay OPEN |
-| **Turn OFF (Action Verbs)**| `switch off the light`, `power down`, `shut off the lights`, `deactivate relay` | Green LED LOW, Relay OPEN |
-| **Turn OFF (Colloquial)**| `lights out`, `kill the lights`, `goodnight`, `dark`, `turn it off` | Green LED LOW, Relay OPEN |
-| **Turn OFF (Phonetic)** | `ten off`, `the ninth`, `lite off` (handles Vosk acoustic variants) | Green LED LOW, Relay OPEN |
-| **Conversational** | `can you turn on the lights please`, `could you turn off the light` | Tolerates polite fillers |
-| **Negation Guard** | `don't turn on the light`, `never turn on`, `do not switch off` | Ignored as `UNKNOWN` |
+### 1. Automated Audio Test Suite
 
-### How the Laptop Reverse Proxy Works
+The repository includes pre-recorded test audio samples in `audio/`:
+- `light_on.wav`, `lights_on.wav`, `turn_on.wav` &rarr; Activates Green LED & Relay.
+- `light_off.wav`, `lights_off.wav`, `turn_off.wav` &rarr; Deactivates Green LED & Relay.
+- `hello_unknown.wav` &rarr; Triggers Yellow Status LED warning.
 
-The laptop web server features a built-in reverse proxy at `/api/`:
-- `GET /api/status` &rarr; Proxies to the Pi's `/status` endpoint (returns states of all 3 LEDs and Relay).
-- `POST /api/control` &rarr; Pure direct GPIO signal to turn the light ON or OFF directly without speech recognition.
-- `POST /api/gpio` &rarr; Independently toggles individual pins (`green`, `relay`, `yellow`, `red`, or `all`).
-- `GET /api/history` &rarr; Multi-device live activity feed with client IP addresses from all connected devices.
-- `GET /api/commands` &rarr; Returns full categorized catalog of voice phrases, GPIO test specs, and tips.
-- `POST /api/audio` &rarr; Proxies raw 16 kHz WAV audio to the Pi's `/audio` endpoint.
-
-**Benefits of the Proxy:**
-- **No Mixed Content Blocks:** Mobile browsers loaded over HTTPS can talk to the HTTP Pi server through the laptop proxy without security errors.
-- **Zero CORS Configuration:** Eliminates cross-origin resource sharing restrictions on mobile clients.
-- **Unified Multi-Device Logging:** Captures and displays every device's IP address and command in real time.
-
-### Voice Format Compatibility
-
-The client audio engine strictly honors the Raspberry Pi server's audio format specifications:
-- **Sample Rate:** Downsampled from native browser rates down to **16,000 Hz**.
-- **Channels:** Single-channel mono.
-- **Bit Depth:** 16-bit linear PCM (`Int16`).
-- **Container:** Standard 44-byte RIFF/WAVE header assembly directly in JavaScript.
-
-The server exposes these endpoints:
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/status` | Read current Green LED, Relay, Yellow LED, and Red LED states |
-| `POST` | `/control` | Send pure direct GPIO signal (`ON` / `OFF`) bypassing speech recognition |
-| `POST` | `/gpio` | Toggle individual hardware pin (`green`, `relay`, `yellow`, `red`, `all`) |
-| `GET` | `/history` | Read multi-device command activity history with client IP addresses |
-| `DELETE` | `/history` | Clear command activity history |
-| `GET` | `/commands`| Retrieve categorized catalog of supported voice command aliases & examples |
-| `POST` | `/audio` | Submit a mono, 16-bit PCM WAV recording for Vosk recognition |
-
-Do not expose port 8765 or port 8080/8443 directly to the public internet without proper firewall controls.
-
-## Testing recorded WAV files
-
-The `audio/` folder contains sample recordings. The audio must be mono,
-16-bit PCM WAV; other formats are rejected by the transcriber.
-
-To test one recording and display the result on the red, yellow, and green
-LEDs:
+Run the test suite against the local Vosk model:
 
 ```bash
-python -m tests.audio_led_tester \
-    /home/pi/Vosk_Project/audio/lights_on.wav \
-    --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15
+# Test all audio files in sequence:
+python tests/test_voice_commands.py
+
+# Test an individual WAV file:
+python tests/test_voice_commands.py audio/turn_on.wav
+
+# Specify custom hold delay:
+python tests/test_voice_commands.py --hold-delay 0.5
 ```
 
-To process every WAV file in a folder:
+> [!NOTE]
+> When executed on a non-Raspberry Pi system (such as Windows or macOS) without `gpiozero`, the test suite automatically engages simulated hardware mode so you can verify speech recognition without errors!
+
+---
+
+## 🎙️ Standalone Raspberry Pi USB Microphone Mode
+
+If you prefer to plug a USB microphone directly into your Raspberry Pi and run local voice control without any web server or network connection:
 
 ```bash
-python -m tests.audio_led_tester \
-    --audio-folder /home/pi/Vosk_Project/audio \
-    --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15
+# Install audio recording library
+pip3 install sounddevice
+
+# Run standalone microphone controller
+python3 examples/standalone_mic_control.py
 ```
 
-The tester can also be launched directly:
+This runs a continuous offline listening loop directly on the Pi hardware.
 
-```bash
-cd /home/pi/Vosk_Project
-python3 tests/audio_led_tester.py \
-    --audio-folder /home/pi/Vosk_Project/audio
-```
+---
 
-Use `--hold-delay 0` and `--inter-file-delay 0` for a faster test. The tester
-uses GPIO 17 for errors, GPIO 27 for warnings/unrecognized speech, GPIO 22
-for the green light state, and GPIO 23 for the relay. It turns the LEDs and
-relay off when it exits.
-
-For transcription-only development, inspect
-`tests/voice_transcription_test.py` and `core/transcriber.py`; these do not
-replace the GPIO safety checks in the runnable controller.
-
-## Configuration
-
-### GPIO and relay behavior
-
-All GPIO arguments use BCM numbering:
-
-```bash
-python -m examples.live_microphone_controller --light-pin 22
-python -m examples.live_microphone_controller --light-pin 22 --relay-pin 23
-python -m servers.network_voice_server --light-pin 22 --relay-pin 23 --yellow-pin 27
-```
-
-Use `--active-low` only when the relay documentation says that LOW activates
-the relay.
-
-### Supported commands
-
-The shared parser in `core/command_parser.py` accepts direct phrases including:
-
-- `lights on`, `light on`, `turn on`, `turn on the light`, `switch on`
-- `lights off`, `light off`, `turn off`, `turn off the light`, `switch off`
-
-It also has a word-based fallback for combinations containing `turn` or
-`switch`, `light` or `lights`, and `on` or `off`. Unrecognized speech is
-ignored by the light controller.
-
-### Audio format
-
-The recognizer is configured for one audio channel, 16-bit samples, and a
-16 kHz sample rate. The browser and laptop clients create this format
-automatically. For a different microphone sample rate in local mode, pass
-`--sample-rate`, but keep the input mono and 16-bit.
-
-## Troubleshooting
-
-### `sounddevice` cannot find a microphone
-
-1. Confirm the USB microphone is connected.
-2. Run `python -m sounddevice`.
-3. Pass the correct device number with `--device N`.
-4. On Linux, confirm that PortAudio and ALSA packages were installed.
-
-### `Model path does not exist` or model loading fails
-
-Run the command from the repository root or pass the complete model path:
-
-```bash
-python -m examples.live_microphone_controller \
-    --model /home/pi/Vosk_Project/vosk-model-small-en-us-0.15
-```
-
-The path must be the extracted model directory, not the ZIP file.
-
-### The transcript is empty or incorrect
-
-Speak close to the microphone, reduce background noise, and use short,
-natural commands. Confirm the recording is mono, 16-bit PCM WAV when testing
-files. The small model is lightweight and may be less accurate than larger
-Vosk models.
-
-### The relay switches in the opposite direction
-
-Stop the program and retry with `--active-low`. Do not repeatedly test an
-unknown relay circuit while it is connected to mains power.
-
-### The laptop cannot connect to the Pi
-
-Confirm both devices are on the same LAN, verify the IP address with
-`hostname -I`, and check that port `8765` is not blocked by the Pi firewall.
-The server terminal should show a listening message. Try opening
-`http://PI_IP_ADDRESS:8765/status` from the laptop; a JSON response means the
-server is reachable.
-
-### The browser cannot use the microphone
-
-- **Accessing via Localhost:** Open `http://localhost:8080`, grant microphone permission when prompted. Do not open `index.html` via `file://`.
-- **Accessing from Phones/Tablets across Local Network:** Mobile browsers (Safari on iOS, Chrome on Android) prohibit microphone access over plain HTTP when accessed via a network IP.
-  - **Recommended fix:** Run the laptop web server with `--ssl` (`python clients/web_server.py --ssl --pi http://192.168.1.50:8765`), open `https://<laptop-ip>:8443` on your phone, and accept the self-signed certificate.
-  - **Alternative fix (Android Chrome):** In Chrome on your phone, go to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add `http://<laptop-ip>:8080`, enable it, and relaunch Chrome.
-- **Microphone sensitivity:** Open the Settings drawer (gear icon in the top header) and adjust the **Speech Sensitivity** and **Silence Trigger Delay** sliders to match ambient room noise.
-
-## Safety
-
-- Start with an LED before connecting a relay.
-- Never drive a motor, lamp, or other load directly from a Raspberry Pi GPIO.
-- Never connect mains voltage to a breadboard or exposed relay contacts.
-- Use a properly enclosed, correctly rated relay module and follow local
-  electrical regulations. If you are not qualified to work with mains wiring,
-  ask a qualified electrician.
-- Keep the Pi GPIO voltage within its limits and share a ground with the relay
-  module where the module requires it.
-- The programs turn outputs off during normal shutdown, but always disconnect
-  power before changing wiring.
-- The network server has no authentication or encryption; use it only on a
-  trusted private network.
-
-## Project layout
+## 📂 Project Directory Structure
 
 ```text
 Vosk_Project/
-├── audio/                         # Sample WAV recordings (lights_on, lights_off, etc.)
-├── certs/                         # Auto-generated self-signed SSL certs for LAN HTTPS
-├── clients/
-│   ├── network_voice_client.py    # Laptop microphone Python client
-│   ├── web_server.py              # Local network web server & reverse proxy
-│   └── web/                       # Modern web client UI
-│       ├── app.js                 # 16kHz WAV encoder, 3 execution modes, visualizer
-│       ├── help.html              # Dedicated Commands & Help documentation page
-│       ├── index.html             # Responsive HUD layout & Help modal dialog
-│       ├── styles.css             # Dark-mode glassmorphism stylesheet
-│       ├── test.html              # Dedicated 4-channel hardware diagnostics page
-│       └── test.js                # Diagnostics test suite script
-├── core/
-│   ├── command_parser.py          # ON/OFF/UNKNOWN command parsing
-│   ├── relay.py                   # Relay module driver
-│   └── transcriber.py             # WAV transcription helper
-├── examples/
-│   ├── live_microphone_controller.py
-│   └── audio_file_light_controller.py
-├── servers/
-│   └── network_voice_server.py    # HTTP server for audio recognition & GPIO
-├── tests/
-│   ├── audio_led_tester.py       # WAV-to-LED test runner
-│   └── voice_transcription_test.py
-├── vosk-model-small-en-us-0.15/   # Local Vosk speech model
-├── start_web_client.bat           # 1-click Windows launcher for web client
-└── README.md
+├── audio/                             # Sample WAV recordings for automated testing
+│   ├── hello_unknown.wav              # Non-command speech -> Yellow Status LED
+│   ├── light_off.wav                  # "light off" -> Deactivate
+│   ├── light_on.wav                   # "light on" -> Activate
+│   ├── lights_off.wav                 # "the lights off" -> Deactivate
+│   ├── lights_on.wav                  # "lights on" -> Activate
+│   ├── turn_off.wav                   # "turn off" (phonetic alias) -> Deactivate
+│   └── turn_on.wav                    # "turn on" (phonetic alias) -> Activate
+├── certs/                             # Local SSL certificates for mobile HTTPS
+│   ├── cert.pem
+│   └── key.pem
+├── clients/                           # Client web server and web assets
+│   ├── __init__.py
+│   ├── client_web_server.py           # Web server, reverse proxy, and mock mode
+│   └── web/                           # Front-end UI assets
+│       ├── app.js                     # Web Audio recorder, VAD, and UI logic
+│       ├── diagnostics.html           # Hardware diagnostics interface
+│       ├── diagnostics.js             # Diagnostics controller
+│       ├── help.html                  # Commands and setup reference
+│       ├── index.html                 # Main voice controller dashboard
+│       └── styles.css                 # Glassmorphic dark theme
+├── core/                              # Shared core backend modules
+│   ├── __init__.py
+│   ├── command_parser.py              # Spoken phrase matcher and phonetic aliases
+│   ├── model_resolver.py              # Dynamic Vosk model auto-discovery
+│   ├── relay.py                       # Hardware relay abstraction
+│   └── transcriber.py                 # Vosk speech transcription engine
+├── docs/                              # Project documentation assets
+│   └── images/                        # Screenshots, wiring diagrams, and demo GIFs
+│       └── .gitkeep
+├── examples/                          # Standalone offline scripts
+│   ├── __init__.py
+│   └── standalone_mic_control.py       # Direct USB mic listening on Raspberry Pi
+├── servers/                           # Backend server microservices
+│   ├── __init__.py
+│   └── voice_detection_server.py       # Voice detection and GPIO control server
+├── tests/                             # Test runners and automated verification
+│   ├── __init__.py
+│   └── test_voice_commands.py         # Batch audio test runner with mock GPIO
+├── vosk-model-small-en-us-0.15/       # Offline Vosk English acoustic model
+├── .gitignore                         # Git ignore definitions
+├── README.md                          # Comprehensive project documentation
+├── start_voice_server.sh              # Raspberry Pi server launcher script
+├── start_web_client.bat               # Windows client launcher script
+└── start_web_client.sh                # Linux/macOS client launcher script
 ```
 
-## License
+---
 
-See the repository license file if one is added to the project. The Vosk model
-is distributed by Alpha Cephei under the terms provided with that model; check
-its accompanying documentation before redistributing it.
+## ❓ Troubleshooting & FAQ
+
+### 1. Browser says "Microphone Permission Denied" on Mobile Phone
+- **Cause:** Web browsers restrict microphone access (`navigator.mediaDevices.getUserMedia`) to `localhost` or secure contexts (`https://`).
+- **Solution:** Start the client server with `--ssl` flag (`python clients/client_web_server.py --pi http://<PI_IP>:8765 --ssl`) and access via `https://<PC_IP>:8443`.
+
+### 2. Client Web Server Cannot Reach the Raspberry Pi (`Connection Refused`)
+- **Cause:** The Raspberry Pi IP address has changed or the voice server is not running.
+- **Solution:** 
+  1. Verify the Pi's IP on your network by running `hostname -I` on the Pi.
+  2. Confirm the server is active: `curl http://<PI_IP>:8765/status`.
+  3. Ensure both the client device and Raspberry Pi are on the same Wi-Fi subnet / LAN.
+
+### 3. Relay Logic is Inverted (Turns OFF when commanded ON)
+- **Cause:** Some relay modules operate on **active-low** logic (trigger on 0V) rather than active-high.
+- **Solution:** Start the voice server with the `--active-low` flag:
+  ```bash
+  python3 servers/voice_detection_server.py --active-low
+  ```
+
+### 4. Speech Recognition Accuracy is Low
+- **Microphone Placement:** Speak clearly within 15–30 cm of your microphone.
+- **Background Noise:** Use the Push-to-Talk mode to minimize ambient sound pickup.
+- **Alternative Vosk Models:** For higher accuracy (requiring ~1 GB RAM), you can download the larger `vosk-model-en-us-0.22` model and place it in the project root.
+
+---
+
+## 🖼️ Media & Diagram Asset Checklist
+
+This checklist summarizes all visual placeholders throughout this documentation. When adding your media files, simply drop the corresponding file into `docs/images/` using the specified filename:
+
+| # | File Path | Type | Recommended Resolution / Specs | Section in README | What to Capture |
+|---|---|---|---|---|---|
+| **1** | `docs/images/demo_hero.gif` | Animated GIF / Video | `850×480` or `1280×720` (15–20 fps, optimized) | [Header Demo](#offline-voice-controlled-light--appliance-system-for-raspberry-pi) | End-to-end demo of user speaking into web UI and the physical LED/relay activating |
+| **2** | `docs/images/system_architecture.png` | Graphic / Diagram | `1920×1080` (PNG or SVG) | [System Architecture](#-system-architecture) | Visual architecture block diagram of client, proxy, Pi server, Vosk, and GPIO pins |
+| **3** | `docs/images/web_interface_main.png` | Screenshot | `1920×1080` or `1280×720` (PNG) | [Web Client Tour](#1-main-voice-controller-dashboard-indexhtml) | Main dashboard at `/index.html` with active waveform, buttons, and HUD status lights |
+| **4** | `docs/images/web_diagnostics.png` | Screenshot | `1920×1080` or `1280×720` (PNG) | [Web Client Tour](#2-hardware-diagnostics-suite-diagnosticshtml) | Pin diagnostics suite at `/diagnostics.html` showing individual toggle controls and pulse test |
+| **5** | `docs/images/mobile_interface.png` | Screenshot | `1080×1920` or `750×1334` (Mobile Portrait PNG) | [Web Client Tour](#3-mobile-device-interface-responsive--https) | Mobile browser view running over HTTPS with microphone active |
+| **6** | `docs/images/voice_server_terminal.png` | Screenshot | `1400×900` or terminal capture (PNG) | [Raspberry Pi Voice Server](#-raspberry-pi-voice-server) | Terminal showing server startup, dynamic model detection, audio receipt, and GPIO logs |
+| **7** | `docs/images/circuit_wiring_diagram.png` | Schematic / Graphic | `1920×1080` (PNG or SVG) | [Hardware Wiring](#-hardware-wiring--circuit-diagram) | Fritzing or schematic diagram showing Raspberry Pi, LEDs, resistors, relay, 12V supply, and light strip |
+| **8** | `docs/images/hardware_setup_photo.png` | Photo | `1920×1080` (High-res JPG / PNG) | [Hardware Wiring](#-hardware-wiring--circuit-diagram) | Physical workbench photo of the assembled Raspberry Pi, breadboard, relay, and LEDs |
+
+---
+
+## ⚡ Safety & Electrical Guidelines
+
+1. **Low-Voltage Isolation:** Always power external loads (such as 12V LED strips, solenoids, or motors) from an independent, rated power supply. Never attempt to draw 12V from any Raspberry Pi pin.
+2. **Current Limiting Resistors:** Always place 220Ω to 330Ω resistors in series with your LEDs to prevent burning out Raspberry Pi GPIO pins.
+3. **Inductive Load Suppression:** If controlling relays, motors, or inductive loads, ensure your relay module has an onboard optocoupler and flyback protection diode to prevent reverse voltage spikes.
+4. **Common Ground:** Maintain a common ground connection between the Raspberry Pi and the low-voltage logic side of the relay board.
+5. **Power Down Before Modifying:** Always disconnect power to both the Raspberry Pi and the 12V supply before altering any jumper wires on the breadboard.
+
+---
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0. The offline Vosk speech recognition engine and Kaldi acoustic models are provided by [Alpha Cephei](https://alphacephei.com/vosk/) under the Apache 2.0 License.

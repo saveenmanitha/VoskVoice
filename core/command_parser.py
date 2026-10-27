@@ -80,6 +80,10 @@ ON_PHRASES = (
     "term on",
     "lite on",
     "line on",
+    "like on",
+    "lights or",
+    "light or",
+    "the unknown",
 )
 
 OFF_PHRASES = (

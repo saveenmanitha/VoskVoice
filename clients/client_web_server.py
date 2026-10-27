@@ -1,11 +1,13 @@
-"""Local network web server and reverse proxy for the Vosk Raspberry Pi Voice Controller.
+"""Client Web Server and LAN Reverse Proxy for the Vosk Voice Controller.
 
 Features:
-- Proxies API calls to the Pi, eliminating CORS and Mixed Content blocks.
-- Pure direct GPIO signals for quick action buttons (/api/control), bypassing Vosk speech recognition.
-- Individual component pin control (/api/gpio) for Green LED, Relay, Yellow LED, and Red LED.
-- Unified multi-device activity feed (/api/history) showing commands from all connected local IPs.
-- Automatic LAN IP detection and self-signed SSL certificate generation for mobile microphone access.
+- Serves the responsive web application to phones, tablets, and laptops on the local Wi-Fi.
+- Automatically proxies API requests to the Raspberry Pi voice detection server, eliminating CORS and Mixed-Content blocks.
+- Pure direct GPIO signals for quick action buttons (/api/control), bypassing speech recognition.
+- Hardware diagnostics and individual pin controls (/api/gpio) for Green LED, Relay, Yellow LED, Red LED.
+- Shared multi-device activity feed (/api/history).
+- Dynamic LAN IP detection and self-signed SSL certificate generation for mobile microphone access.
+- Mock Mode (--mock-pi) for development and UI testing without a physical Raspberry Pi.
 """
 
 import argparse
@@ -31,10 +33,11 @@ if sys.stdout.encoding != "utf-8":
     except Exception:
         pass
 
-
 # Root and client directories
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 WEB_DIR = PROJECT_ROOT / "clients" / "web"
 AUDIO_DIR = PROJECT_ROOT / "audio"
 DEFAULT_CERTS_DIR = PROJECT_ROOT / "certs"
@@ -103,7 +106,7 @@ def ensure_ssl_certificates(cert_path: Path, key_path: Path) -> bool:
 
 
 class MockPiState:
-    """Simulated Pi hardware state for testing without physical Pi."""
+    """Simulated Raspberry Pi hardware state for testing without physical hardware."""
 
     def __init__(self) -> None:
         self.light_on = False
@@ -133,7 +136,7 @@ class MockPiState:
             "message": message,
         }
         self.history.insert(0, entry)
-        if len(self.history) > 50:
+        if len(self.history) > 60:
             self.history.pop()
         return entry
 
@@ -242,7 +245,6 @@ def create_request_handler(
 ):
     current_pi_url = [target_pi_url.rstrip("/")]
     mock_state = MockPiState() if mock_mode else None
-    # Shared multi-client history kept on the web server as well
     server_history: list[dict] = []
 
     def record_history(client_ip: str, action_type: str, transcript: str, command: str, message: str):
@@ -329,7 +331,6 @@ def create_request_handler(
                 self._handle_post_config()
                 return
             elif self.path == "/api/quick":
-                # Forward to direct control for 100% reliable GPIO signaling
                 self._handle_post_control(client_ip)
                 return
 
@@ -365,17 +366,14 @@ def create_request_handler(
                 self._send_json_response(mock_state.history)
                 return
 
-            # Try reading history from Pi server
             url = f"{current_pi_url[0]}/history"
             req = urllib.request.Request(url, method="GET")
             try:
                 with urllib.request.urlopen(req, timeout=3) as response:
                     data = json.loads(response.read().decode("utf-8"))
-                    # Merge any web server history entries
                     self._send_json_response(data)
                     return
             except Exception:
-                # Fallback to web server's multi-device history
                 self._send_json_response(server_history)
 
         def _handle_get_config(self) -> None:
@@ -423,7 +421,6 @@ def create_request_handler(
                 self._send_json_response(res)
                 return
 
-            # Forward to Pi server's /control endpoint
             url = f"{current_pi_url[0]}/control"
             payload = json.dumps({"command": command}).encode("utf-8")
             req = urllib.request.Request(
@@ -444,14 +441,13 @@ def create_request_handler(
                     )
                     self._send_json_response(data, status=response.status)
             except Exception as err:
-                # If Pi has older server without /control, fallback gracefully
                 self._send_json_response(
                     {"error": f"Failed to execute direct GPIO command on Pi: {err}"},
                     status=502,
                 )
 
         def _handle_post_gpio(self, client_ip: str) -> None:
-            """Individual pin test toggle for Green, Relay, Yellow, or Red."""
+            """Individual pin test toggle for Green LED, Relay, Yellow LED, or Red LED."""
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -466,7 +462,6 @@ def create_request_handler(
                 self._send_json_response(res)
                 return
 
-            # Forward to Pi /gpio endpoint
             url = f"{current_pi_url[0]}/gpio"
             payload = json.dumps({"component": component, "state": state}).encode("utf-8")
             req = urllib.request.Request(
@@ -516,7 +511,6 @@ def create_request_handler(
                 self._send_json_response(res)
                 return
 
-            # Forward to Pi server
             url = f"{current_pi_url[0]}/audio"
             req = urllib.request.Request(
                 url,
@@ -550,7 +544,7 @@ def create_request_handler(
                 )
 
         def log_message(self, format: str, *args) -> None:
-            sys.stderr.write(f"[WEB SERVER] {format % args}\n")
+            sys.stderr.write(f"[CLIENT WEB SERVER] {format % args}\n")
 
     return WebClientRequestHandler
 
@@ -566,39 +560,36 @@ def print_banner(
     protocol = "https" if is_ssl else "http"
     line = "=" * 68
     print("\n" + line)
-    print("  [*] VOSK PI VOICE CONTROLLER - LOCAL CLIENT WEB SERVER")
+    print("  [*] VOSK PI VOICE CONTROLLER - CLIENT WEB SERVER")
     print(line)
-    print(f"  * Local Machine:   {protocol}://localhost:{port}")
+    print(f"  * Local Machine:    {protocol}://localhost:{port}")
     if local_ips:
         for ip in local_ips:
-            print(f"  * LAN Network:     {protocol}://{ip}:{port}")
+            print(f"  * LAN Network:      {protocol}://{ip}:{port}")
     else:
-        print(f"  * LAN Network:     {protocol}://{host}:{port}")
-    print(f"  * Target Pi Server:{pi_url}")
+        print(f"  * LAN Network:      {protocol}://{host}:{port}")
+    print(f"  * Target Pi Server: {pi_url}")
     if mock_mode:
-        print("  * Mode:            SIMULATED MOCK PI (Physical Pi not required)")
+        print("  * Mode:             SIMULATED MOCK PI (Physical Pi not required)")
     else:
-        print("  * Mode:            LIVE PROXY (Forwarding audio/status to Pi)")
+        print("  * Mode:             LIVE PROXY (Forwarding commands/audio to Pi)")
     print(line)
-    print("  [>] Device Access Instructions:")
-    print("  1. Connect your phone or tablet to the same Wi-Fi network.")
+    print("  Pages Available:")
+    print(f"    1. Voice Controller:     {protocol}://localhost:{port}/index.html")
+    print(f"    2. Hardware Diagnostics: {protocol}://localhost:{port}/diagnostics.html")
+    print(f"    3. Commands & Help:      {protocol}://localhost:{port}/help.html")
+    print(line)
     if is_ssl:
-        print(f"  2. Open {protocol}://{local_ips[0] if local_ips else host}:{port}")
-        print("  3. Bypass the self-signed certificate warning (Advanced -> Proceed).")
-        print("     This enables microphone access across local network devices!")
+        print("  [>] Mobile Devices: Connect via HTTPS and bypass self-signed warning")
+        print("      to grant browser microphone permissions over Wi-Fi.")
     else:
-        print(f"  2. Open {protocol}://{local_ips[0] if local_ips else host}:{port}")
-        print("     Note: To record microphone on mobile devices, run with --ssl")
-        print("     or enable insecure origin in chrome://flags.")
-    print("  4. Voice Controller:  /index.html")
-    print("  5. Pin Control Suite: /test.html")
-    print("  6. Commands & Help:   /help.html")
+        print("  [>] Mobile Notice: Run with --ssl to allow mobile microphone recording.")
     print(line + "\n")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Host the client web interface on the local network."
+        description="Host the client web interface and reverse proxy on the local network."
     )
     parser.add_argument(
         "--host",
@@ -614,13 +605,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pi",
         default="http://raspberrypi.local:8765",
-        help="Pi server URL (default: http://raspberrypi.local:8765)",
+        help="Target Raspberry Pi voice detection server URL (default: http://raspberrypi.local:8765)",
     )
     parser.add_argument(
         "--ssl",
         "--https",
         action="store_true",
-        help="Enable HTTPS with self-signed certificate (allows mobile mic access)",
+        help="Enable HTTPS with self-signed certificate (required for mobile mic access)",
     )
     parser.add_argument(
         "--cert",
@@ -637,7 +628,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mock-pi",
         action="store_true",
-        help="Run in mock mode without needing a running Pi",
+        help="Run in mock mode without needing a running Raspberry Pi",
     )
     return parser.parse_args()
 

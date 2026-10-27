@@ -1,23 +1,38 @@
+"""Vosk audio transcription engine."""
+
+import json
 import os
 import wave
-import json
 from pathlib import Path
-from vosk import Model, KaldiRecognizer, SetLogLevel
+from typing import Optional
+from vosk import KaldiRecognizer, Model, SetLogLevel
+
+from core.model_resolver import get_audio_dir, resolve_model_path
 
 # Silence Kaldi debug logs (-1)
 SetLogLevel(-1)
 
+
 class VoskAudioTranscriber:
-    def __init__(self, model_path: str):
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model path does not exist: {model_path}")
-        print("Loading Vosk model into memory...")
-        self.model = Model(model_path)
+    """Wrapper around Vosk Kaldi speech recognizer for WAV files."""
+
+    def __init__(self, model_path: Optional[str] = None) -> None:
+        self.model_path = resolve_model_path(model_path)
+        print(f"[VOSK] Loading model from: {self.model_path}")
+        self.model = Model(self.model_path)
 
     def transcribe_file(self, audio_path: str) -> str:
-        """
-        Transcribes a WAV file.
-        Raises ValueError or wave.Error if the file is invalid/corrupt.
+        """Transcribe a WAV file into text.
+
+        Args:
+            audio_path: Path to the WAV audio file.
+
+        Returns:
+            str: Transcribed text string.
+
+        Raises:
+            FileNotFoundError: If the audio file does not exist.
+            ValueError: If audio is not mono 16-bit PCM.
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -35,10 +50,10 @@ class VoskAudioTranscriber:
 
             recognizer = KaldiRecognizer(self.model, sample_rate)
             segments = []
-            CHUNK = 4000
+            chunk = 4000
 
             while True:
-                data = wf.readframes(CHUNK)
+                data = wf.readframes(chunk)
                 if len(data) == 0:
                     break
                 if recognizer.AcceptWaveform(data):
@@ -56,9 +71,9 @@ class VoskAudioTranscriber:
         finally:
             wf.close()
 
-    def get_audio_files(self, folder_path: str) -> list[str]:
-        """Finds all .wav files in the folder."""
-        folder = Path(folder_path)
+    def get_audio_files(self, folder_path: Optional[str] = None) -> list[str]:
+        """Find and return all .wav files in the folder."""
+        folder = get_audio_dir(folder_path)
         if not folder.is_dir():
-            raise FileNotFoundError(f"Audio folder not found: {folder_path}")
-        return [str(p) for p in folder.glob("*.wav")]
+            raise FileNotFoundError(f"Audio folder not found: {folder}")
+        return [str(p) for p in sorted(folder.glob("*.wav"))]

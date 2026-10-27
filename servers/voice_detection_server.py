@@ -1,12 +1,13 @@
-"""Raspberry Pi server for network voice commands and direct GPIO control.
+"""Raspberry Pi Voice Detection & GPIO Hardware Server.
 
-The server receives short WAV recordings over the local network, transcribes
-them with the local Vosk model, controls the GPIO lights and relay, and supports
-pure direct GPIO commands for deterministic testing and multi-client activity logging.
+Receives audio recordings over the local network, transcribes them using the local
+Vosk speech model, and controls connected GPIO lights and relay. Also supports direct
+GPIO signals for instant controls, hardware diagnostics, and multi-client activity logging.
 """
 
 import argparse
 import json
+import os
 import sys
 import time
 import wave
@@ -16,46 +17,56 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-# Allow this file to be run directly with `python servers/...py`.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.command_parser import check_light_command
+from core.command_parser import check_light_command, get_command_examples
+from core.model_resolver import resolve_model_path
 from core.relay import RelayModule
 
 
 class VoiceCommandServer:
+    """Manages Vosk speech transcription and GPIO actuator control on Raspberry Pi."""
+
     def __init__(
         self,
         model_path: str,
         light_pin: int = 22,
         yellow_pin: int = 27,
         red_pin: int = 17,
+        relay_pin: int = 23,
         active_low: bool = False,
         max_audio_bytes: int = 2_000_000,
-        relay_pin: int = 23,
     ) -> None:
         try:
             from gpiozero import LED
             from vosk import KaldiRecognizer, Model, SetLogLevel
         except ImportError as error:
             raise RuntimeError(
-                "Install dependencies on the Pi with: "
-                "pip3 install vosk gpiozero"
+                "Missing required libraries on the Raspberry Pi.\n"
+                "Install them with: pip3 install vosk gpiozero"
             ) from error
 
         if max_audio_bytes <= 0:
             raise ValueError("max_audio_bytes must be greater than zero")
+
         SetLogLevel(-1)
         self.max_audio_bytes = max_audio_bytes
+        self.model_path = model_path
         self.model = Model(model_path)
         self.light = LED(light_pin)
         self.relay = RelayModule(relay_pin, active_low=active_low)
         self.yellow_led = LED(yellow_pin)
         self.red_led = LED(red_pin)
+
+        # Initialize all pins to OFF state
         self.light.off()
         self.relay.off()
         self.yellow_led.off()
         self.red_led.off()
+
         self._recognizer_type = KaldiRecognizer
         self.history: list[dict[str, object]] = []
 
@@ -67,6 +78,7 @@ class VoiceCommandServer:
         command: str,
         message: str,
     ) -> dict[str, object]:
+        """Record an action in the shared activity log."""
         entry = {
             "id": f"{int(time.time() * 1000)}",
             "time": datetime.now().strftime("%H:%M:%S"),
@@ -77,15 +89,16 @@ class VoiceCommandServer:
             "message": message,
         }
         self.history.insert(0, entry)
-        if len(self.history) > 50:
+        if len(self.history) > 60:
             self.history.pop()
         return entry
 
     def process_wav(
         self, audio_bytes: bytes, client_ip: str = "Unknown"
     ) -> dict[str, object]:
+        """Transcribe audio bytes and toggle LEDs/relay accordingly."""
         if len(audio_bytes) > self.max_audio_bytes:
-            raise ValueError("Audio recording is too large")
+            raise ValueError("Audio recording exceeds maximum permitted size")
 
         with wave.open(BytesIO(audio_bytes), "rb") as wav_file:
             if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2:
@@ -97,6 +110,7 @@ class VoiceCommandServer:
 
         transcript = result.get("text", "").strip()
         command = check_light_command(transcript)
+
         if command == "ON":
             self.light.on()
             self.relay.on()
@@ -120,6 +134,7 @@ class VoiceCommandServer:
     def set_direct(
         self, command: str, client_ip: str = "Unknown"
     ) -> dict[str, object]:
+        """Direct GPIO signal command (bypasses speech recognition)."""
         cmd = command.upper()
         if cmd == "ON":
             self.light.on()
@@ -150,6 +165,7 @@ class VoiceCommandServer:
     def set_pin(
         self, component: str, state: bool, client_ip: str = "Unknown"
     ) -> dict[str, object]:
+        """Diagnostic pin toggle for individual hardware components."""
         comp = component.lower().strip()
         state_str = "ON" if state else "OFF"
 
@@ -198,6 +214,7 @@ class VoiceCommandServer:
         command: str = "UNKNOWN",
         message: Optional[str] = None,
     ) -> dict[str, object]:
+        """Return the current logical and physical status of the hardware."""
         default_msg = {
             "ON": "Light turned on",
             "OFF": "Light turned off",
@@ -221,6 +238,7 @@ class VoiceCommandServer:
         self.history.clear()
 
     def close(self) -> None:
+        """Safely release all GPIO resources."""
         self.light.off()
         self.relay.off()
         self.yellow_led.off()
@@ -232,6 +250,8 @@ class VoiceCommandServer:
 
 
 def make_handler(controller: VoiceCommandServer):
+    """Factory creating the HTTP request handler bound to the controller instance."""
+
     class RequestHandler(BaseHTTPRequestHandler):
         def _send_json(self, result: object, status: int = 200) -> None:
             response = json.dumps(result).encode("utf-8")
@@ -265,7 +285,6 @@ def make_handler(controller: VoiceCommandServer):
             elif self.path == "/history":
                 self._send_json(controller.get_history())
             elif self.path == "/commands":
-                from core.command_parser import get_command_examples
                 self._send_json(get_command_examples())
             else:
                 self.send_error(404, "Unknown GET endpoint")
@@ -321,14 +340,12 @@ def make_handler(controller: VoiceCommandServer):
                 return
 
             elif self.path == "/gpio":
-                # Individual pin test toggle (Green, Relay, Yellow, Red)
+                # Individual pin test toggle (Green, Relay, Yellow, Red, All)
                 try:
                     payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                     component = payload.get("component", "")
                     state = bool(payload.get("state", False))
-                    result = controller.set_pin(
-                        component, state, client_ip=client_ip
-                    )
+                    result = controller.set_pin(component, state, client_ip=client_ip)
                     self._send_json(result)
                     print(
                         f'[PIN TEST from {client_ip}] {component} -> {"ON" if state else "OFF"}',
@@ -348,29 +365,66 @@ def make_handler(controller: VoiceCommandServer):
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Receive laptop voice recordings and control a Pi GPIO light."
+        description="Raspberry Pi Voice Detection and GPIO Hardware Server."
     )
     parser.add_argument(
-        "--model", default="/home/pi/Vosk_Project/vosk-model-small-en-us-0.15"
+        "--model",
+        default=None,
+        help="Path to the Vosk speech model directory (automatically detected if omitted)",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Interface to listen on")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--light-pin", type=int, default=22)
-    parser.add_argument("--relay-pin", type=int, default=23)
+    parser.add_argument(
+        "--host", default="0.0.0.0", help="Network interface to bind on (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8765, help="Port to listen on (default: 8765)"
+    )
+    parser.add_argument(
+        "--light-pin", type=int, default=22, help="BCM GPIO pin for Green LED (default: 22)"
+    )
+    parser.add_argument(
+        "--relay-pin", type=int, default=23, help="BCM GPIO pin for 12V Relay (default: 23)"
+    )
     parser.add_argument(
         "--yellow-pin",
         type=int,
         default=27,
-        help="BCM GPIO pin for unrecognized-command status (default: 27)",
+        help="BCM GPIO pin for Yellow Status LED (default: 27)",
     )
     parser.add_argument(
         "--red-pin",
         type=int,
         default=17,
-        help="BCM GPIO pin for error status (default: 17)",
+        help="BCM GPIO pin for Red Error LED (default: 17)",
     )
-    parser.add_argument("--active-low", action="store_true")
+    parser.add_argument(
+        "--active-low",
+        action="store_true",
+        help="Enable if your relay module is active-low (energizes on LOW signal)",
+    )
     return parser.parse_args()
+
+
+def print_server_banner(host: str, port: int, model_path: str, args: argparse.Namespace) -> None:
+    line = "=" * 68
+    print("\n" + line)
+    print("  [*] RASPBERRY PI VOICE DETECTION & GPIO SERVER")
+    print(line)
+    print(f"  * Listening Address:    http://{host}:{port}")
+    print(f"  * Speech Model:         {model_path}")
+    print(f"  * Green Light Pin:      BCM GPIO {args.light_pin}")
+    print(f"  * 12V Relay Pin:        BCM GPIO {args.relay_pin} (Active {'Low' if args.active_low else 'High'})")
+    print(f"  * Yellow Status Pin:    BCM GPIO {args.yellow_pin}")
+    print(f"  * Red Error Pin:        BCM GPIO {args.red_pin}")
+    print(line)
+    print("  Endpoints:")
+    print("    POST   /audio     - Send 16kHz Mono WAV recording for Vosk STT")
+    print("    POST   /control   - Direct GPIO signal ({\"command\": \"ON\"|\"OFF\"})")
+    print("    POST   /gpio      - Pin test ({\"component\": \"green\"|\"relay\", \"state\": true})")
+    print("    GET    /status    - Retrieve current pin and system status")
+    print("    GET    /history   - Retrieve activity log from connected devices")
+    print("    GET    /commands  - Retrieve list of recognized voice phrases")
+    print("    DELETE /history   - Clear activity log")
+    print(line + "\n")
 
 
 def main() -> int:
@@ -378,26 +432,28 @@ def main() -> int:
     controller: Optional[VoiceCommandServer] = None
     server: Optional[ThreadingHTTPServer] = None
     try:
+        # Dynamically discover model path across any project location
+        model_path = resolve_model_path(arguments.model)
+        print(f"[VOSK] Model path dynamically resolved to: {model_path}")
+
         controller = VoiceCommandServer(
-            arguments.model,
+            model_path,
             light_pin=arguments.light_pin,
             yellow_pin=arguments.yellow_pin,
             red_pin=arguments.red_pin,
-            active_low=arguments.active_low,
             relay_pin=arguments.relay_pin,
+            active_low=arguments.active_low,
         )
         server = ThreadingHTTPServer(
             (arguments.host, arguments.port), make_handler(controller)
         )
-        print(
-            f"Listening for commands on http://{arguments.host}:{arguments.port} (audio & direct GPIO)"
-        )
+        print_server_banner(arguments.host, arguments.port, model_path, arguments)
         server.serve_forever()
         return 0
     except KeyboardInterrupt:
-        print("\n[SHUTDOWN] Server stopped.")
+        print("\n[SHUTDOWN] Voice detection server stopped.")
         return 130
-    except (OSError, RuntimeError, ValueError) as error:
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         print(f"[STARTUP ERROR] {error}", file=sys.stderr)
         return 1
     finally:
