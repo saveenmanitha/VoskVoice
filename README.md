@@ -15,8 +15,7 @@ This repository includes three ways to send a command:
    server. This is the easiest option for users who do not want to install a
    microphone client on the laptop.
 
-The project recognizes commands such as `turn on the light`, `turn off the
-light`, `lights on`, `lights off`, `switch on`, and `switch off`.
+The project recognizes dozens of versatile command phrases, conversational sentences, and common phonetic variations, such as `turn on the light`, `turn off the light`, `lights on`, `lights out`, `kill the lights`, `goodnight`, `switch on`, `power down`, `illuminate`, and `activate relay`.
 
 ## Contents
 
@@ -368,8 +367,20 @@ It includes a dark-mode glassmorphism design, real-time hardware status indicato
    - An optional **Continuous Listening** toggle in settings keeps listening for further commands.
 3. **⏺️ Tap-to-Toggle (Manual Start/Stop):**
    - Tap once to begin recording and tap again when done.
-4. **💡 Quick Action Test Chips:**
-   - One-tap buttons for `Light ON`, `Light OFF`, and `Refresh State` for instant testing and manual overrides.
+4. **⚡ Pure Direct GPIO Signals (100% Reliable Quick Actions):**
+   - One-tap buttons for `Light ON` and `Light OFF` that send a **pure direct electrical signal to the GPIO pins**, completely separated from the Vosk speech recognizer. This eliminates any possibility of "command not recognized" errors during manual quick testing.
+5. **🛠️ Hardware Diagnostics Page (`/test.html`):**
+   - A dedicated diagnostic test suite page that lets you **independently test each of the 3 LEDs and the Relay module**:
+     - **Green LED** (BCM GPIO 22 &bull; Pin 15) &mdash; Toggle ON/OFF or Pulse 1s
+     - **12V Relay Module** (BCM GPIO 23 &bull; Pin 16) &mdash; Toggle Contacts or Click Test
+     - **Yellow Status LED** (BCM GPIO 27 &bull; Pin 13) &mdash; Toggle ON/OFF or Blink 3x
+     - **Red Error LED** (BCM GPIO 17 &bull; Pin 11) &mdash; Toggle ON/OFF or Pulse 1s
+     - **Master Batch Suite** &mdash; All ON, All OFF, and an automated Sequential Cycle Test
+6. **🌐 Multi-Device Live Activity Feed:**
+   - The Command Activity feed on both pages receives **every command sent across all phones, tablets, and computers on your local Wi-Fi**, displaying the originating client IP address (e.g. `192.168.1.45`) next to each command in real time!
+7. **📖 Commands & Help Page (`/help.html`) & Interactive Help Modal:**
+   - **Dedicated Help Page (`/help.html`):** A complete reference manual for all voice commands, hardware pin configurations, mobile mic setup guides, and troubleshooting tips.
+   - **In-App Help Modal Window:** Accessible directly on the main controller via the **"📖 Example Phrases"** tab or **"Help & Phrases"** button. Tap any example phrase chip to instantly preview or copy the command!
 
 ### Hosting the Web Client on Your Laptop
 
@@ -400,6 +411,11 @@ The server automatically detects your laptop's local LAN IP address and prints t
   * Target Pi Server:http://192.168.1.50:8765
   * Mode:            LIVE PROXY (Forwarding audio/status to Pi)
 ====================================================================
+  [>] Navigation:
+  * Voice Controller:    http://192.168.1.13:8080/index.html
+  * Pin Control Suite:   http://192.168.1.13:8080/test.html
+  * Commands & Help:     http://192.168.1.13:8080/help.html
+====================================================================
 ```
 
 #### Option C: HTTPS Launch (Recommended for Mobile Devices)
@@ -416,17 +432,37 @@ python clients/web_server.py --pi http://192.168.1.50:8765 --ssl
 - When the browser displays the local self-signed certificate warning, tap **Advanced** &rarr; **Proceed to site**.
 - Microphone access will be fully enabled!
 
+### Supported Voice Command Aliases & Phrases
+
+The command parser (`core/command_parser.py`) incorporates a robust multi-layered recognition engine with 40+ aliases per action, phonetic speech variations, natural language filler tolerance, and negation protection:
+
+| Command Type | Spoken Phrases & Aliases | Action Taken |
+| --- | --- | --- |
+| **Turn ON (Standard)** | `turn on the light`, `turn on lights`, `turn on the lights`, `lights on`, `light on` | Green LED HIGH, Relay CLOSED |
+| **Turn ON (Action Verbs)**| `switch on the light`, `power on the lights`, `power up`, `activate light`, `activate relay` | Green LED HIGH, Relay CLOSED |
+| **Turn ON (Colloquial)**| `put on the light`, `light up`, `illuminate`, `brighten`, `turn it on` | Green LED HIGH, Relay CLOSED |
+| **Turn ON (Phonetic)** | `the north`, `ten on`, `to non`, `lite on` (handles Vosk acoustic variants) | Green LED HIGH, Relay CLOSED |
+| **Turn OFF (Standard)** | `turn off the light`, `turn off lights`, `turn off the lights`, `lights off`, `light off` | Green LED LOW, Relay OPEN |
+| **Turn OFF (Action Verbs)**| `switch off the light`, `power down`, `shut off the lights`, `deactivate relay` | Green LED LOW, Relay OPEN |
+| **Turn OFF (Colloquial)**| `lights out`, `kill the lights`, `goodnight`, `dark`, `turn it off` | Green LED LOW, Relay OPEN |
+| **Turn OFF (Phonetic)** | `ten off`, `the ninth`, `lite off` (handles Vosk acoustic variants) | Green LED LOW, Relay OPEN |
+| **Conversational** | `can you turn on the lights please`, `could you turn off the light` | Tolerates polite fillers |
+| **Negation Guard** | `don't turn on the light`, `never turn on`, `do not switch off` | Ignored as `UNKNOWN` |
+
 ### How the Laptop Reverse Proxy Works
 
 The laptop web server features a built-in reverse proxy at `/api/`:
-- `GET /api/status` &rarr; Proxies to the Pi's `/status` endpoint.
+- `GET /api/status` &rarr; Proxies to the Pi's `/status` endpoint (returns states of all 3 LEDs and Relay).
+- `POST /api/control` &rarr; Pure direct GPIO signal to turn the light ON or OFF directly without speech recognition.
+- `POST /api/gpio` &rarr; Independently toggles individual pins (`green`, `relay`, `yellow`, `red`, or `all`).
+- `GET /api/history` &rarr; Multi-device live activity feed with client IP addresses from all connected devices.
+- `GET /api/commands` &rarr; Returns full categorized catalog of voice phrases, GPIO test specs, and tips.
 - `POST /api/audio` &rarr; Proxies raw 16 kHz WAV audio to the Pi's `/audio` endpoint.
-- `POST /api/quick` &rarr; Dispatches sample command WAV audio to the Pi.
 
 **Benefits of the Proxy:**
 - **No Mixed Content Blocks:** Mobile browsers loaded over HTTPS can talk to the HTTP Pi server through the laptop proxy without security errors.
 - **Zero CORS Configuration:** Eliminates cross-origin resource sharing restrictions on mobile clients.
-- **Automatic Connection:** Mobile devices connect to the Pi instantly without having to type the Pi's IP into the client.
+- **Unified Multi-Device Logging:** Captures and displays every device's IP address and command in real time.
 
 ### Voice Format Compatibility
 
@@ -440,8 +476,13 @@ The server exposes these endpoints:
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/status` | Read current green LED, relay, and status LED state |
-| `POST` | `/audio` | Submit a mono, 16-bit PCM WAV recording |
+| `GET` | `/status` | Read current Green LED, Relay, Yellow LED, and Red LED states |
+| `POST` | `/control` | Send pure direct GPIO signal (`ON` / `OFF`) bypassing speech recognition |
+| `POST` | `/gpio` | Toggle individual hardware pin (`green`, `relay`, `yellow`, `red`, `all`) |
+| `GET` | `/history` | Read multi-device command activity history with client IP addresses |
+| `DELETE` | `/history` | Clear command activity history |
+| `GET` | `/commands`| Retrieve categorized catalog of supported voice command aliases & examples |
+| `POST` | `/audio` | Submit a mono, 16-bit PCM WAV recording for Vosk recognition |
 
 Do not expose port 8765 or port 8080/8443 directly to the public internet without proper firewall controls.
 
@@ -591,8 +632,11 @@ Vosk_Project/
 │   ├── web_server.py              # Local network web server & reverse proxy
 │   └── web/                       # Modern web client UI
 │       ├── app.js                 # 16kHz WAV encoder, 3 execution modes, visualizer
-│       ├── index.html             # Responsive HUD layout
-│       └── styles.css             # Dark-mode glassmorphism stylesheet
+│       ├── help.html              # Dedicated Commands & Help documentation page
+│       ├── index.html             # Responsive HUD layout & Help modal dialog
+│       ├── styles.css             # Dark-mode glassmorphism stylesheet
+│       ├── test.html              # Dedicated 4-channel hardware diagnostics page
+│       └── test.js                # Diagnostics test suite script
 ├── core/
 │   ├── command_parser.py          # ON/OFF/UNKNOWN command parsing
 │   ├── relay.py                   # Relay module driver
