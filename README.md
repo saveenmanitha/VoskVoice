@@ -146,8 +146,8 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 <!-- PLACEHOLDER 3: CLIENT WEB SERVER MAIN DASHBOARD SCREENSHOT        -->
 <!-- ================================================================= -->
 <div align="center">
-  <a href="docs/images/web_interface_main.png">
-    <img src="docs/images/web_interface_main.png" alt="Client Web Server Dashboard" width="850">
+  <a href="docs/images/web_interface_main.gif">
+    <img src="docs/images/web_interface_main.gif" alt="Client Web Server Dashboard" width="850">
   </a>
   <p>
     <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_interface_main.png</code><br>
@@ -169,8 +169,8 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 <!-- PLACEHOLDER 4: HARDWARE DIAGNOSTICS SUITE SCREENSHOT              -->
 <!-- ================================================================= -->
 <div align="center">
-  <a href="docs/images/web_diagnostics.png">
-    <img src="docs/images/web_diagnostics.png" alt="Hardware Diagnostics Interface" width="850">
+  <a href="docs/images/web_diagnostics.gif">
+    <img src="docs/images/web_diagnostics.gif" alt="Hardware Diagnostics Interface" width="850">
   </a>
   <p>
     <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_diagnostics.png</code><br>
@@ -190,8 +190,8 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 <!-- PLACEHOLDER 5: MOBILE RESPONSIVE VIEW OVER HTTPS                  -->
 <!-- ================================================================= -->
 <div align="center">
-  <a href="docs/images/mobile_interface.png">
-    <img src="docs/images/mobile_interface.png" alt="Mobile Web Interface over HTTPS" width="450">
+  <a href="docs/images/mobile_interface.gif">
+    <img src="docs/images/mobile_interface.gif" alt="Mobile Web Interface over HTTPS" width="450">
   </a>
   <p>
     <em>📱 <b>Screenshot Placeholder:</b> <code>docs/images/mobile_interface.png</code><br>
@@ -209,8 +209,8 @@ The backend runs on the Raspberry Pi as a lightweight HTTP micro-service listeni
 <!-- PLACEHOLDER 6: RASPBERRY PI VOICE SERVER TERMINAL CONSOLE         -->
 <!-- ================================================================= -->
 <div align="center">
-  <a href="docs/images/voice_server_terminal.png">
-    <img src="docs/images/voice_server_terminal.png" alt="Raspberry Pi Voice Server Terminal Output" width="850">
+  <a href="docs/images/voice_server_terminal.gif">
+    <img src="docs/images/voice_server_terminal.gif" alt="Raspberry Pi Voice Server Terminal Output" width="850">
   </a>
   <p>
     <em>💻 <b>Screenshot Placeholder:</b> <code>docs/images/voice_server_terminal.png</code><br>
