@@ -282,7 +282,7 @@
           </div>
         </div>
         <p style="font-size: 0.8rem; color: var(--text-secondary);">
-          Primary light indicator; energizes with voice "turn on the light" or direct signal.
+          Dynamic recognition indicator: pulses with a celebratory double/triple burst upon valid voice command.
         </p>
         <div class="diag-controls">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -292,7 +292,10 @@
             </label>
             <span id="label-green" class="state-pill state-off">OFF</span>
           </div>
-          <button class="pulse-test-btn" data-pin="green" data-action="pulse">Pulse 1s</button>
+          <div style="display: flex; gap: 6px;">
+            <button class="pulse-test-btn" data-pin="green" data-action="pattern" data-pattern="green_dynamic">Dynamic Burst</button>
+            <button class="pulse-test-btn" data-pin="green" data-action="pulse">Pulse 1s</button>
+          </div>
         </div>
         <div class="hud-glow-indicator light-glow"></div>
       </div>
@@ -326,12 +329,12 @@
         <div class="hud-glow-indicator relay-glow"></div>
       </div>
 
-      <!-- 3. Yellow Warning LED Card -->
+      <!-- 3. Yellow Warning & Error Alert LED Card -->
       <div id="diag-card-yellow" class="diag-card">
         <div class="diag-card-top">
           <div class="diag-info">
             <span class="diag-pin-tag">BCM GPIO 27 &bull; Pin 13</span>
-            <h3 style="margin-top: 6px;">Yellow Status / Warning LED</h3>
+            <h3 style="margin-top: 6px;">Yellow Status / Error LED</h3>
           </div>
           <div class="hud-icon-wrap status-icon" style="width: 44px; height: 44px;">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -340,7 +343,7 @@
           </div>
         </div>
         <p style="font-size: 0.8rem; color: var(--text-secondary);">
-          Illuminates when speech is detected but the command is unrecognized (UNKNOWN).
+          Dynamic dual-response: Breathing fade on unknown voice commands; rapid warning strobe on system/audio errors.
         </p>
         <div class="diag-controls">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -350,27 +353,29 @@
             </label>
             <span id="label-yellow" class="state-pill state-off">OFF</span>
           </div>
-          <button class="pulse-test-btn" data-pin="yellow" data-action="blink">Blink 3x</button>
+          <div style="display: flex; gap: 6px;">
+            <button class="pulse-test-btn" data-pin="yellow" data-action="pattern" data-pattern="yellow_fade">Breathing Fade</button>
+            <button class="pulse-test-btn" data-pin="yellow" data-action="pattern" data-pattern="yellow_error" style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;">Rapid Strobe</button>
+          </div>
         </div>
         <div class="hud-glow-indicator status-glow"></div>
       </div>
 
-      <!-- 4. Red Error LED Card -->
+      <!-- 4. Red Recording Tally LED Card -->
       <div id="diag-card-red" class="diag-card">
         <div class="diag-card-top">
           <div class="diag-info">
             <span class="diag-pin-tag">BCM GPIO 17 &bull; Pin 11</span>
-            <h3 style="margin-top: 6px;">Red Error LED</h3>
+            <h3 style="margin-top: 6px;">Red Recording Tally LED</h3>
           </div>
           <div class="hud-icon-wrap" style="width: 44px; height: 44px; background: rgba(239, 68, 68, 0.15); color: #f87171;">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/>
-              <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="7" fill="currentColor"/>
             </svg>
           </div>
         </div>
         <p style="font-size: 0.8rem; color: var(--text-secondary);">
-          Hardware error &amp; corrupted audio indicator (used in audio LED test suite).
+          Studio tally light: Pulses / blinks actively while voice recording or audio transmission is in progress.
         </p>
         <div class="diag-controls">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -380,7 +385,10 @@
             </label>
             <span id="label-red" class="state-pill state-off">OFF</span>
           </div>
-          <button class="pulse-test-btn" data-pin="red" data-action="pulse">Pulse 1s</button>
+          <div style="display: flex; gap: 6px;">
+            <button id="btn-tally-toggle" class="pulse-test-btn" data-pin="red" data-action="toggle_tally">Toggle Tally</button>
+            <button class="pulse-test-btn" data-pin="red" data-action="pulse">Pulse 1s</button>
+          </div>
         </div>
         <div class="hud-glow-indicator" style="background: linear-gradient(90deg, transparent, #ef4444, transparent);"></div>
       </div>

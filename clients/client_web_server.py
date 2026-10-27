@@ -113,6 +113,7 @@ class MockPiState:
         self.relay_on = False
         self.yellow_led_on = False
         self.red_led_on = False
+        self.recording_active = False
         self.last_transcript = ""
         self.last_command = "OFF"
         self.message = "System ready (Mock Mode)"
@@ -145,52 +146,61 @@ class MockPiState:
             "transcript": self.last_transcript,
             "command": self.last_command,
             "light_on": self.light_on,
+            "green_led_on": self.light_on,
             "relay_on": self.relay_on,
             "yellow_led_on": self.yellow_led_on,
             "status_led_on": self.yellow_led_on,
             "red_led_on": self.red_led_on,
+            "recording_active": self.recording_active,
             "message": self.message,
             "mock": True,
         }
+
+    def set_recording(self, recording: bool, client_ip: str = "Unknown") -> dict:
+        self.recording_active = bool(recording)
+        self.red_led_on = bool(recording)
+        self.message = "Voice recording indicator active" if recording else "Voice recording stopped"
+        return self.get_status()
 
     def process_command(
         self, transcript: str, command: str, client_ip: str = "Unknown"
     ) -> dict:
         self.last_transcript = transcript
         self.last_command = command
+        self.recording_active = False
+        self.red_led_on = False
+
         if command == "ON":
             self.light_on = True
             self.relay_on = True
             self.yellow_led_on = False
-            self.red_led_on = False
-            self.message = "Light turned on (simulated)"
+            self.message = "Light turned on (dynamic Green response)"
         elif command == "OFF":
             self.light_on = False
             self.relay_on = False
             self.yellow_led_on = False
-            self.red_led_on = False
-            self.message = "Light turned off (simulated)"
+            self.message = "Light turned off (dynamic Green response)"
         else:
             self.yellow_led_on = True
-            self.red_led_on = False
-            self.message = "No supported light command recognized (simulated)"
+            self.message = "No supported light command recognized (dynamic Yellow fade)"
 
         self.add_history(client_ip, "VOICE", transcript, command, self.message)
         return self.get_status()
 
     def set_direct(self, command: str, client_ip: str = "Unknown") -> dict:
         cmd = command.upper()
+        self.recording_active = False
+        self.red_led_on = False
+
         if cmd == "ON":
             self.light_on = True
             self.relay_on = True
             self.yellow_led_on = False
-            self.red_led_on = False
             self.message = "Light turned on (pure GPIO signal)"
         elif cmd == "OFF":
             self.light_on = False
             self.relay_on = False
             self.yellow_led_on = False
-            self.red_led_on = False
             self.message = "Light turned off (pure GPIO signal)"
         else:
             self.message = f"Unknown direct command: {command}"
@@ -203,33 +213,61 @@ class MockPiState:
         return self.get_status()
 
     def set_pin(
-        self, component: str, state: bool, client_ip: str = "Unknown"
+        self,
+        component: str,
+        state: Optional[bool] = None,
+        pattern: Optional[str] = None,
+        client_ip: str = "Unknown",
     ) -> dict:
         comp = component.lower().strip()
-        state_str = "ON" if state else "OFF"
+        state_bool = bool(state) if state is not None else False
+        state_str = "ON" if state_bool else "OFF"
 
-        if comp in ("green", "light"):
-            self.light_on = state
-            name = "Green LED"
-        elif comp == "relay":
-            self.relay_on = state
-            name = "12V Relay"
-        elif comp in ("yellow", "status"):
-            self.yellow_led_on = state
-            name = "Yellow LED"
-        elif comp in ("red", "error"):
-            self.red_led_on = state
-            name = "Red Error LED"
-        elif comp == "all":
-            self.light_on = state
-            self.relay_on = state
-            self.yellow_led_on = state
-            self.red_led_on = state
-            name = "All Hardware Pins"
+        if pattern:
+            pat = pattern.lower().strip()
+            if "green" in pat or "success" in pat:
+                self.light_on = True
+                name = "Green LED (Dynamic Burst)"
+            elif "fade" in pat or "unknown" in pat:
+                self.yellow_led_on = True
+                name = "Yellow LED (Breathing Fade)"
+            elif "alert" in pat or "error" in pat:
+                self.yellow_led_on = True
+                name = "Yellow LED (Rapid Warning Strobe)"
+            elif "record" in pat or "rec" in pat:
+                self.red_led_on = True
+                self.recording_active = True
+                name = "Red LED (Recording Tally Blink)"
+            else:
+                name = f"Pattern {pattern}"
+            self.message = f"{name} simulated"
+            state_str = "PATTERN"
         else:
-            name = component
+            if comp in ("green", "light"):
+                self.light_on = state_bool
+                name = "Green LED"
+            elif comp == "relay":
+                self.relay_on = state_bool
+                name = "12V Relay"
+            elif comp in ("yellow", "status"):
+                self.yellow_led_on = state_bool
+                name = "Yellow LED"
+            elif comp in ("red", "error", "recording", "rec"):
+                self.red_led_on = state_bool
+                self.recording_active = state_bool
+                name = "Red Recording LED"
+            elif comp == "all":
+                self.light_on = state_bool
+                self.relay_on = state_bool
+                self.yellow_led_on = state_bool
+                self.red_led_on = state_bool
+                self.recording_active = state_bool
+                name = "All Hardware Pins"
+            else:
+                name = component
 
-        self.message = f"{name} set to {state_str} (simulated)"
+            self.message = f"{name} set to {state_str} (simulated)"
+
         self.last_transcript = f"Test Pin: {name}"
         self.last_command = state_str
         self.add_history(
@@ -321,6 +359,9 @@ def create_request_handler(
             if self.path == "/api/audio":
                 self._handle_post_audio(client_ip)
                 return
+            elif self.path == "/api/recording":
+                self._handle_post_recording(client_ip)
+                return
             elif self.path == "/api/control":
                 self._handle_post_control(client_ip)
                 return
@@ -407,6 +448,38 @@ def create_request_handler(
             except Exception as err:
                 self._send_json_response({"error": str(err)}, status=400)
 
+        def _handle_post_recording(self, client_ip: str) -> None:
+            """Notify Pi server of voice recording state (drives Red LED tally)."""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+                recording = bool(body.get("recording", body.get("state") in ("start", "on", True)))
+            except Exception:
+                recording = False
+
+            if mock_state is not None:
+                res = mock_state.set_recording(recording, client_ip=client_ip)
+                self._send_json_response(res)
+                return
+
+            url = f"{current_pi_url[0]}/recording"
+            payload = json.dumps({"recording": recording}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    self._send_json_response(data, status=response.status)
+            except Exception as err:
+                self._send_json_response(
+                    {"error": f"Failed to sync recording state with Pi: {err}", "recording": recording},
+                    status=200,
+                )
+
         def _handle_post_control(self, client_ip: str) -> None:
             """Pure direct GPIO signal to turn lights ON or OFF."""
             try:
@@ -447,23 +520,24 @@ def create_request_handler(
                 )
 
         def _handle_post_gpio(self, client_ip: str) -> None:
-            """Individual pin test toggle for Green LED, Relay, Yellow LED, or Red LED."""
+            """Individual pin test toggle or dynamic pattern test for LEDs/Relay."""
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
                 component = body.get("component", "green")
-                state = bool(body.get("state", False))
+                state = body.get("state", None)
+                pattern = body.get("pattern", None)
             except Exception as err:
                 self._send_json_response({"error": f"Invalid GPIO body: {err}"}, status=400)
                 return
 
             if mock_state is not None:
-                res = mock_state.set_pin(component, state, client_ip=client_ip)
+                res = mock_state.set_pin(component, state=state, pattern=pattern, client_ip=client_ip)
                 self._send_json_response(res)
                 return
 
             url = f"{current_pi_url[0]}/gpio"
-            payload = json.dumps({"component": component, "state": state}).encode("utf-8")
+            payload = json.dumps({"component": component, "state": state, "pattern": pattern}).encode("utf-8")
             req = urllib.request.Request(
                 url,
                 data=payload,
@@ -476,7 +550,7 @@ def create_request_handler(
                     record_history(
                         client_ip,
                         "PIN_TEST",
-                        f"Pin Test: {component} {'ON' if state else 'OFF'}",
+                        f"Pin Test: {component} {f'Pattern:{pattern}' if pattern else ('ON' if state else 'OFF')}",
                         "TEST",
                         data.get("message", "Pin updated"),
                     )

@@ -201,7 +201,7 @@
           <span class="hud-pin-badge">GPIO 27</span>
         </div>
         <div class="hud-card-body">
-          <span class="hud-label">Status Yellow LED</span>
+          <span class="hud-label">Yellow Status / Error LED</span>
           <div class="hud-state-row">
             <span id="status-led-badge" class="state-pill state-idle">IDLE</span>
             <span id="status-led-subtext" class="hud-subtext">Normal</span>
@@ -210,26 +210,24 @@
         <div class="hud-glow-indicator status-glow"></div>
       </div>
 
-      <!-- Red Error LED Card -->
+      <!-- Red Recording Tally LED Card -->
       <div id="card-red-led" class="hud-card">
         <div class="hud-card-header">
-          <div class="hud-icon-wrap" style="background: rgba(239, 68, 68, 0.12); color: #f87171;">
+          <div class="hud-icon-wrap red-icon" style="background: rgba(239, 68, 68, 0.12); color: #f87171;">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="7" fill="currentColor"/>
             </svg>
           </div>
           <span class="hud-pin-badge">GPIO 17</span>
         </div>
         <div class="hud-card-body">
-          <span class="hud-label">Red Error LED</span>
+          <span class="hud-label">Red Recording Tally LED</span>
           <div class="hud-state-row">
-            <span id="red-led-badge" class="state-pill state-off">OFF</span>
-            <span id="red-led-subtext" class="hud-subtext">Normal</span>
+            <span id="red-led-badge" class="state-pill state-off">STANDBY</span>
+            <span id="red-led-subtext" class="hud-subtext">Voice Tally Standby</span>
           </div>
         </div>
-        <div class="hud-glow-indicator" style="background: linear-gradient(90deg, transparent, #ef4444, transparent);"></div>
+        <div class="hud-glow-indicator red-glow" style="background: linear-gradient(90deg, transparent, #ef4444, transparent);"></div>
       </div>
     </section>
 

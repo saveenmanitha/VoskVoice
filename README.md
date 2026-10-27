@@ -265,10 +265,10 @@ All GPIO pin references use standard Broadcom (BCM) numbering:
 
 | Component | BCM Pin | Physical Pin | Recommended Wiring | Functional Purpose |
 |---|---|---|---|---|
-| 🟢 **Green Command LED** | `GPIO 22` | Pin 15 | In series with a 220Ω – 330Ω resistor to GND | Illuminates when the light is switched **ON** |
+| 🟢 **Green Command LED** | `GPIO 22` | Pin 15 | In series with a 220Ω – 330Ω resistor to GND | **Dynamic Recognition Burst:** Multi-blinks on valid command confirmation, then settles to target state |
 | ⚡ **12V Relay Module** | `GPIO 23` | Pin 16 | Signal (IN) pin; VCC to 5V (Pin 2/4), GND to Pin 6 | Switches external 12V DC power to LED strip |
-| 🟡 **Yellow Status LED** | `GPIO 27` | Pin 13 | In series with a 220Ω – 330Ω resistor to GND | Blinks when speech is recognized but unmapped |
-| 🔴 **Red Error LED** | `GPIO 17` | Pin 11 | In series with a 220Ω – 330Ω resistor to GND | Flashes on malformed audio or server error |
+| 🟡 **Yellow Status / Error LED** | `GPIO 27` | Pin 13 | In series with a 220Ω – 330Ω resistor to GND | **Dynamic Dual-Response:** Breathing fade on unknown speech; rapid warning strobe on system/audio errors |
+| 🔴 **Red Recording Tally LED** | `GPIO 17` | Pin 11 | In series with a 220Ω – 330Ω resistor to GND | **Recording Tally Indicator:** Rhythmic studio pulse/blink while recording or sending audio |
 | ⏚ **Common Ground (GND)** | `GND` | Pin 6, 9, 14, 20, 25 | Connected to breadboard negative ground rail | Shared ground reference for all LEDs and relay |
 
 > [!IMPORTANT]
@@ -285,10 +285,11 @@ The command parser (`core/command_parser.py`) normalizes speech strings and eval
 
 | Target Action | Recognized Spoken Phrases & Aliases | Hardware Reaction |
 |---|---|---|
-| **Turn ON** | `"light on"`, `"lights on"`, `"turn on"`, `"turn on the light"`, `"turn on the lights"`, `"turn the light on"`, `"turn on light"`, `"switch on"`, `"activate"`, `"lamp on"` | 🟢 Green LED ON<br>⚡ Relay ON (12V strip energizes) |
-| **Turn OFF** | `"light off"`, `"lights off"`, `"turn off"`, `"turn off the light"`, `"turn off the lights"`, `"turn the light off"`, `"turn off light"`, `"switch off"`, `"deactivate"`, `"lamp off"` | 🟢 Green LED OFF<br>⚡ Relay OFF (12V strip powers down) |
-| **Unknown Speech** | Any audible spoken phrase not matching above (e.g., `"hello"`, `"what is the weather"`) | 🟡 Yellow Status LED pulses for 1.2s |
-| **Audio / Engine Error** | Empty audio stream, corrupted WAV header, or transcription failure | 🔴 Red Error LED flashes |
+| **Turn ON** | `"light on"`, `"lights on"`, `"turn on"`, `"turn on the light"`, `"turn on the lights"`, `"turn the light on"`, `"turn on light"`, `"switch on"`, `"activate"`, `"lamp on"` | 🟢 Green LED Dynamic Burst &rarr; ON<br>⚡ Relay ON (12V strip energizes) |
+| **Turn OFF** | `"light off"`, `"lights off"`, `"turn off"`, `"turn off the light"`, `"turn off the lights"`, `"turn the light off"`, `"turn off light"`, `"switch off"`, `"deactivate"`, `"lamp off"` | 🟢 Green LED Dynamic Burst &rarr; OFF<br>⚡ Relay OFF (12V strip powers down) |
+| **Unknown Speech** | Any audible spoken phrase not matching above (e.g., `"hello"`, `"what is the weather"`) | 🟡 Yellow Status LED executes a soft breathing fade |
+| **Audio / Engine Error** | Empty audio stream, corrupted WAV header, or transcription failure | 🟡 Yellow Status LED flashes rapid warning strobe (rerouted from Red) |
+| **Recording in Progress** | Microphone active, push-to-talk held, or audio payload uploading | 🔴 Red Recording Tally LED actively blinks like a studio recording button |
 
 ---
 

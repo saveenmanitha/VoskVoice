@@ -492,6 +492,36 @@
       </div>
     </section>
 
+    <!-- Dynamic LED Hardware Feedback Guide -->
+    <section class="help-section">
+      <div class="help-header-row">
+        <h2>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Hardware LED Dynamic Feedback System
+        </h2>
+      </div>
+      <div class="guide-cards-grid">
+        <div class="guide-card">
+          <h3 style="color: #34d399;">🟢 Green Command LED (GPIO 22)</h3>
+          <p>
+            Gives a <strong>dynamic response burst</strong> (rapid celebratory multi-blink) whenever a valid light command is recognized, then settles to the target illuminated or standby state.
+          </p>
+        </div>
+        <div class="guide-card">
+          <h3 style="color: #fbbf24;">🟡 Yellow Status &amp; Error LED (GPIO 27)</h3>
+          <p>
+            <strong>Breathing fade</strong> when unknown speech is detected. If file, audio, or system errors occur, it triggers a <strong>rapid warning strobe</strong> then stops.
+          </p>
+        </div>
+        <div class="guide-card">
+          <h3 style="color: #f87171;">🔴 Red Recording Tally LED (GPIO 17)</h3>
+          <p>
+            Functions as an active <strong>studio recording tally indicator</strong>: actively pulses/blinks while voice is being recorded or sent, then cleanly turns off once processed.
+          </p>
+        </div>
+      </div>
+    </section>
+
     <!-- Footer -->
     <footer class="app-footer">
       <p>Offline Vosk STT Model: <span class="code-tag">vosk-model-small-en-us-0.15</span> &bull; 16 kHz Mono 16-bit PCM WAV</p>

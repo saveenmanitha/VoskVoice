@@ -51,10 +51,10 @@
   function updateHUD(data) {
     if (!data) return;
 
-    const greenOn = Boolean(data.light_on);
+    const greenOn = Boolean(data.light_on || data.green_led_on);
     const relayOn = Boolean(data.relay_on);
     const yellowOn = Boolean(data.yellow_led_on || data.status_led_on);
-    const redOn = Boolean(data.red_led_on);
+    const redOn = Boolean(data.red_led_on || data.recording_active);
 
     // Green
     toggleGreen.checked = greenOn;
@@ -71,14 +71,14 @@
     // Yellow
     toggleYellow.checked = yellowOn;
     cardYellow.classList.toggle("active-status", yellowOn);
-    labelYellow.textContent = yellowOn ? "ON" : "OFF";
+    labelYellow.textContent = yellowOn ? "ALERT" : "IDLE";
     labelYellow.className = `state-pill ${yellowOn ? "state-alert" : "state-idle"}`;
 
-    // Red
+    // Red Recording Tally
     toggleRed.checked = redOn;
-    cardRed.classList.toggle("active-status", redOn);
-    labelRed.textContent = redOn ? "ON" : "OFF";
-    labelRed.className = `state-pill ${redOn ? "state-alert" : "state-off"}`;
+    cardRed.classList.toggle("active-recording", redOn);
+    labelRed.textContent = redOn ? (data.recording_active ? "REC LIVE" : "ON") : "STANDBY";
+    labelRed.className = `state-pill ${redOn ? "state-rec" : "state-off"}`;
   }
 
   async function setPin(component, state) {
@@ -95,6 +95,23 @@
       }
     } catch (err) {
       console.error("Failed to set pin:", err);
+    }
+  }
+
+  async function sendPattern(component, pattern) {
+    try {
+      const res = await fetch(getApiEndpoint("/gpio"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ component, pattern }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        updateHUD(data);
+        pollHistory();
+      }
+    } catch (err) {
+      console.error("Failed to run pattern test:", err);
     }
   }
 
@@ -172,28 +189,39 @@
   toggleYellow.addEventListener("change", (e) => setPin("yellow", e.target.checked));
   toggleRed.addEventListener("change", (e) => setPin("red", e.target.checked));
 
-  // Pulse & Blink Test buttons
+  // Pulse, Blink, Pattern & Tally Test buttons
+  let tallyBlinking = false;
   document.querySelectorAll(".pulse-test-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const pin = btn.dataset.pin;
       const action = btn.dataset.action;
+      const pattern = btn.dataset.pattern;
       btn.disabled = true;
 
-      if (action === "pulse") {
-        await setPin(pin, true);
-        setTimeout(async () => {
-          await setPin(pin, false);
-          btn.disabled = false;
-        }, 1000);
-      } else if (action === "blink") {
-        // Blink 3 times
-        for (let i = 0; i < 3; i++) {
+      try {
+        if (action === "pattern" && pattern) {
+          await sendPattern(pin, pattern);
+        } else if (action === "toggle_tally") {
+          tallyBlinking = !tallyBlinking;
+          await sendPattern("red", tallyBlinking ? "rec_on" : "rec_off");
+          btn.textContent = tallyBlinking ? "Stop Tally" : "Toggle Tally";
+        } else if (action === "pulse") {
           await setPin(pin, true);
-          await new Promise(r => setTimeout(r, 250));
-          await setPin(pin, false);
-          await new Promise(r => setTimeout(r, 200));
+          setTimeout(async () => {
+            await setPin(pin, false);
+            btn.disabled = false;
+          }, 1000);
+          return;
+        } else if (action === "blink") {
+          for (let i = 0; i < 3; i++) {
+            await setPin(pin, true);
+            await new Promise(r => setTimeout(r, 250));
+            await setPin(pin, false);
+            await new Promise(r => setTimeout(r, 200));
+          }
         }
-        btn.disabled = false;
+      } finally {
+        setTimeout(() => { btn.disabled = false; }, 800);
       }
     });
   });

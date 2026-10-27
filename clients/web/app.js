@@ -165,20 +165,37 @@
     }
   }
 
-  function updateHardwareHUD(data) {
+  async function notifyServerRecording(isRecording) {
+    try {
+      fetch(getApiEndpoint("/recording"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recording: Boolean(isRecording) }),
+        signal: AbortSignal.timeout(1500),
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
+  function updateHardwareHUD(data, dynamicTrigger = null) {
     if (!data) return;
 
-    const lightOn = Boolean(data.light_on);
+    const lightOn = Boolean(data.light_on || data.green_led_on);
     const relayOn = Boolean(data.relay_on);
     const yellowOn = Boolean(data.yellow_led_on || data.status_led_on);
-    const redOn = Boolean(data.red_led_on);
+    const redOn = Boolean(data.red_led_on || data.recording_active);
 
-    // Green LED (GPIO 22)
+    // Green LED (GPIO 22) - Dynamic Command Recognition Burst
     if (cardLight && lightBadge) {
       cardLight.classList.toggle("active-light", lightOn);
       lightBadge.textContent = lightOn ? "ON" : "OFF";
       lightBadge.className = `state-pill ${lightOn ? "state-on" : "state-off"}`;
-      if (lightSubtext) lightSubtext.textContent = lightOn ? "Active / Illuminating" : "Standby";
+      if (lightSubtext) lightSubtext.textContent = lightOn ? "Command Confirmed / Lit" : "Standby";
+
+      if (dynamicTrigger === "burst" || (data.command && (data.command === "ON" || data.command === "OFF"))) {
+        cardLight.classList.remove("active-burst");
+        void cardLight.offsetWidth; // trigger reflow
+        cardLight.classList.add("active-burst");
+      }
     }
 
     // 12V Relay Module (GPIO 23)
@@ -189,20 +206,30 @@
       if (relaySubtext) relaySubtext.textContent = relayOn ? "Energized / Closed" : "Contacts Open";
     }
 
-    // Status Yellow LED (GPIO 27)
+    // Status / Warning Yellow LED (GPIO 27) - Breathing Fade & Rerouted Strobe
     if (cardStatusLed && statusLedBadge) {
       cardStatusLed.classList.toggle("active-status", yellowOn);
       statusLedBadge.textContent = yellowOn ? "ALERT" : "IDLE";
       statusLedBadge.className = `state-pill ${yellowOn ? "state-alert" : "state-idle"}`;
-      if (statusLedSubtext) statusLedSubtext.textContent = yellowOn ? "Unrecognized Command" : "Normal";
+      if (statusLedSubtext) statusLedSubtext.textContent = yellowOn ? "Unknown Command / Warning" : "Normal";
+
+      if (dynamicTrigger === "strobe") {
+        cardStatusLed.classList.remove("active-fade", "active-strobe");
+        void cardStatusLed.offsetWidth;
+        cardStatusLed.classList.add("active-strobe");
+      } else if (dynamicTrigger === "fade" || data.command === "UNKNOWN") {
+        cardStatusLed.classList.remove("active-fade", "active-strobe");
+        void cardStatusLed.offsetWidth;
+        cardStatusLed.classList.add("active-fade");
+      }
     }
 
-    // Red Error LED (GPIO 17)
+    // Red Recording Tally LED (GPIO 17) - Voice Recording / Tally Indicator
     if (cardRedLed && redLedBadge) {
-      cardRedLed.classList.toggle("active-status", redOn);
-      redLedBadge.textContent = redOn ? "ALERT" : "OFF";
-      redLedBadge.className = `state-pill ${redOn ? "state-alert" : "state-off"}`;
-      if (redLedSubtext) redLedSubtext.textContent = redOn ? "Error Alert" : "Normal";
+      cardRedLed.classList.toggle("active-recording", redOn);
+      redLedBadge.textContent = redOn ? "REC LIVE" : "STANDBY";
+      redLedBadge.className = `state-pill ${redOn ? "state-rec" : "state-off"}`;
+      if (redLedSubtext) redLedSubtext.textContent = redOn ? "Voice Recording Active" : "Tally Standby";
     }
   }
 
@@ -502,6 +529,15 @@
     setButtonState("recording");
     if (navigator.vibrate) navigator.vibrate(40);
 
+    // Notify Pi server immediately so Red LED flashes dynamic recording tally
+    notifyServerRecording(true);
+    if (cardRedLed && redLedBadge) {
+      cardRedLed.classList.add("active-recording");
+      redLedBadge.textContent = "REC LIVE";
+      redLedBadge.className = "state-pill state-rec";
+      if (redLedSubtext) redLedSubtext.textContent = "Voice Recording Active";
+    }
+
     clearInterval(recordTimerInterval);
     recordTimerInterval = setInterval(() => {
       const elapsed = ((Date.now() - recordStartTime) / 1000).toFixed(1);
@@ -522,6 +558,7 @@
     setStatusMessage("Transcribing with Vosk model on Pi...", "Processing WAV audio");
 
     if (pcmChunks.length === 0) {
+      notifyServerRecording(false);
       resetVoiceState();
       return;
     }
@@ -546,7 +583,10 @@
 
       const result = await response.json();
       updateResult(result, latency);
-      updateHardwareHUD(result);
+
+      const cmd = (result.command || "").toUpperCase();
+      const trigger = (cmd === "ON" || cmd === "OFF") ? "burst" : (cmd === "UNKNOWN" ? "fade" : null);
+      updateHardwareHUD(result, trigger);
       pollMultiDeviceHistory();
 
       if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
@@ -554,8 +594,16 @@
     } catch (err) {
       showError(`Voice command failed: ${err.message}`);
       setStatusMessage("Recognition Failed", err.message);
+
+      // REROUTED ERROR ALERT: Trigger rapid warning strobe on Yellow status LED card
+      if (cardStatusLed) {
+        cardStatusLed.classList.remove("active-fade", "active-strobe");
+        void cardStatusLed.offsetWidth;
+        cardStatusLed.classList.add("active-strobe");
+      }
     } finally {
       pcmChunks = [];
+      notifyServerRecording(false);
       resetVoiceState();
     }
   }

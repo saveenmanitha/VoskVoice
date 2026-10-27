@@ -23,12 +23,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.command_parser import check_light_command, get_command_examples
+from core.led_controller import LEDController
 from core.model_resolver import resolve_model_path
 from core.relay import RelayModule
 
 
 class VoiceCommandServer:
-    """Manages Vosk speech transcription and GPIO actuator control on Raspberry Pi."""
+    """Manages Vosk speech transcription and dynamic GPIO actuator control on Raspberry Pi."""
 
     def __init__(
         self,
@@ -41,12 +42,11 @@ class VoiceCommandServer:
         max_audio_bytes: int = 2_000_000,
     ) -> None:
         try:
-            from gpiozero import LED
             from vosk import KaldiRecognizer, Model, SetLogLevel
         except ImportError as error:
             raise RuntimeError(
-                "Missing required libraries on the Raspberry Pi.\n"
-                "Install them with: pip3 install vosk gpiozero"
+                "Missing required Vosk library on the Raspberry Pi.\n"
+                "Install it with: pip3 install vosk"
             ) from error
 
         if max_audio_bytes <= 0:
@@ -56,16 +56,21 @@ class VoiceCommandServer:
         self.max_audio_bytes = max_audio_bytes
         self.model_path = model_path
         self.model = Model(model_path)
-        self.light = LED(light_pin)
         self.relay = RelayModule(relay_pin, active_low=active_low)
-        self.yellow_led = LED(yellow_pin)
-        self.red_led = LED(red_pin)
+        self.leds = LEDController(
+            green_pin=light_pin,
+            yellow_pin=yellow_pin,
+            red_pin=red_pin,
+        )
+
+        # Backwards-compatible attributes
+        self.light = self.leds.green
+        self.yellow_led = self.leds.yellow
+        self.red_led = self.leds.red
 
         # Initialize all pins to OFF state
-        self.light.off()
         self.relay.off()
-        self.yellow_led.off()
-        self.red_led.off()
+        self.leds.reset_all()
 
         self._recognizer_type = KaldiRecognizer
         self.history: list[dict[str, object]] = []
@@ -96,12 +101,14 @@ class VoiceCommandServer:
     def process_wav(
         self, audio_bytes: bytes, client_ip: str = "Unknown"
     ) -> dict[str, object]:
-        """Transcribe audio bytes and toggle LEDs/relay accordingly."""
+        """Transcribe audio bytes and trigger dynamic LED/relay responses."""
         if len(audio_bytes) > self.max_audio_bytes:
+            self.leds.system_error_alert()
             raise ValueError("Audio recording exceeds maximum permitted size")
 
         with wave.open(BytesIO(audio_bytes), "rb") as wav_file:
             if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2:
+                self.leds.system_error_alert()
                 raise ValueError("Audio must be mono, 16-bit PCM WAV")
             recognizer = self._recognizer_type(self.model, wav_file.getframerate())
             while data := wav_file.readframes(4000):
@@ -111,22 +118,20 @@ class VoiceCommandServer:
         transcript = result.get("text", "").strip()
         command = check_light_command(transcript)
 
+        # Stop any active recording tally blink on Red LED as audio has arrived
+        self.leds.stop_recording()
+
         if command == "ON":
-            self.light.on()
             self.relay.on()
-            self.yellow_led.off()
-            self.red_led.off()
-            msg = "Light turned on and relay energized"
+            self.leds.command_success(final_state=True)
+            msg = "Light turned on (dynamic Green response)"
         elif command == "OFF":
-            self.light.off()
             self.relay.off()
-            self.yellow_led.off()
-            self.red_led.off()
-            msg = "Light turned off and relay opened"
+            self.leds.command_success(final_state=False)
+            msg = "Light turned off (dynamic Green response)"
         else:
-            self.yellow_led.on()
-            self.red_led.off()
-            msg = "No supported light command was recognized"
+            self.leds.command_unknown()
+            msg = "No supported light command was recognized (dynamic Yellow fade)"
 
         self.add_history(client_ip, "VOICE", transcript, command, msg)
         return self.status(transcript=transcript, command=command, message=msg)
@@ -137,16 +142,12 @@ class VoiceCommandServer:
         """Direct GPIO signal command (bypasses speech recognition)."""
         cmd = command.upper()
         if cmd == "ON":
-            self.light.on()
             self.relay.on()
-            self.yellow_led.off()
-            self.red_led.off()
+            self.leds.command_success(final_state=True)
             msg = "Light turned on (pure GPIO signal)"
         elif cmd == "OFF":
-            self.light.off()
             self.relay.off()
-            self.yellow_led.off()
-            self.red_led.off()
+            self.leds.command_success(final_state=False)
             msg = "Light turned off (pure GPIO signal)"
         else:
             raise ValueError(f"Unsupported direct command: {command}")
@@ -163,40 +164,32 @@ class VoiceCommandServer:
         )
 
     def set_pin(
-        self, component: str, state: bool, client_ip: str = "Unknown"
+        self,
+        component: str,
+        state: Optional[bool] = None,
+        pattern: Optional[str] = None,
+        client_ip: str = "Unknown",
     ) -> dict[str, object]:
-        """Diagnostic pin toggle for individual hardware components."""
+        """Diagnostic pin toggle or dynamic pattern test for hardware components."""
         comp = component.lower().strip()
-        state_str = "ON" if state else "OFF"
 
-        if comp in ("green", "light"):
-            self.light.on() if state else self.light.off()
-            name = "Green LED"
-        elif comp == "relay":
-            self.relay.on() if state else self.relay.off()
-            name = "12V Relay"
-        elif comp in ("yellow", "status"):
-            self.yellow_led.on() if state else self.yellow_led.off()
-            name = "Yellow Status LED"
-        elif comp in ("red", "error"):
-            self.red_led.on() if state else self.red_led.off()
-            name = "Red Error LED"
-        elif comp == "all":
-            if state:
-                self.light.on()
-                self.relay.on()
-                self.yellow_led.on()
-                self.red_led.on()
-            else:
-                self.light.off()
-                self.relay.off()
-                self.yellow_led.off()
-                self.red_led.off()
-            name = "All Hardware Pins"
+        if pattern:
+            msg = self.leds.trigger_pattern_test(pattern)
+            name = f"Pattern ({pattern})"
+            state_str = "PATTERN"
         else:
-            raise ValueError(f"Unknown hardware component: {component}")
+            state_bool = bool(state)
+            state_str = "ON" if state_bool else "OFF"
+            if comp == "relay":
+                self.relay.on() if state_bool else self.relay.off()
+                name = "12V Relay"
+                msg = f"{name} set to {state_str}"
+            elif comp in ("green", "light", "yellow", "status", "red", "error", "recording", "all"):
+                msg = self.leds.set_pin_direct(comp, state_bool)
+                name = f"{comp.capitalize()} LED"
+            else:
+                raise ValueError(f"Unknown hardware component: {component}")
 
-        msg = f"{name} set to {state_str}"
         self.add_history(
             client_ip,
             "PIN_TEST",
@@ -223,11 +216,13 @@ class VoiceCommandServer:
         return {
             "transcript": transcript,
             "command": command,
-            "light_on": self.light.is_active,
+            "light_on": getattr(self.leds.green, "is_lit", False),
+            "green_led_on": getattr(self.leds.green, "is_lit", False),
             "relay_on": self.relay.is_on,
-            "yellow_led_on": self.yellow_led.is_active,
-            "status_led_on": self.yellow_led.is_active,
-            "red_led_on": self.red_led.is_active,
+            "yellow_led_on": getattr(self.leds.yellow, "is_lit", False),
+            "status_led_on": getattr(self.leds.yellow, "is_lit", False),
+            "red_led_on": getattr(self.leds.red, "is_lit", False),
+            "recording_active": self.leds.is_recording_active(),
             "message": message or default_msg,
         }
 
@@ -239,14 +234,9 @@ class VoiceCommandServer:
 
     def close(self) -> None:
         """Safely release all GPIO resources."""
-        self.light.off()
         self.relay.off()
-        self.yellow_led.off()
-        self.red_led.off()
-        self.light.close()
         self.relay.close()
-        self.yellow_led.close()
-        self.red_led.close()
+        self.leds.close()
 
 
 def make_handler(controller: VoiceCommandServer):
@@ -305,8 +295,28 @@ def make_handler(controller: VoiceCommandServer):
                 self.send_error(400, "Content-Length must be an integer")
                 return
 
-            if self.path == "/audio":
+            if self.path == "/recording":
+                # Voice recording state toggle (drives Red LED recording tally)
+                try:
+                    payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length > 0 else {}
+                    is_rec = bool(payload.get("recording", payload.get("state") in ("start", "on", True)))
+                    if is_rec:
+                        controller.leds.start_recording()
+                    else:
+                        controller.leds.stop_recording()
+                    self._send_json({"success": True, "recording": is_rec})
+                    print(
+                        f'[RECORDING from {client_ip}] Red LED Tally -> {"BLINKING" if is_rec else "OFF"}',
+                        flush=True,
+                    )
+                except Exception as error:
+                    self.send_error(400, f"Recording state error: {error}")
+                return
+
+            elif self.path == "/audio":
                 if content_length <= 0 or content_length > controller.max_audio_bytes:
+                    controller.leds.stop_recording()
+                    controller.leds.system_error_alert()
                     self.send_error(413, "Invalid or oversized audio payload")
                     return
 
@@ -314,6 +324,10 @@ def make_handler(controller: VoiceCommandServer):
                     audio_data = self.rfile.read(content_length)
                     result = controller.process_wav(audio_data, client_ip=client_ip)
                 except (OSError, ValueError, wave.Error) as error:
+                    # REROUTE ERRORS: Rapid warning strobe on Yellow LED
+                    controller.leds.stop_recording()
+                    controller.leds.system_error_alert()
+                    print(f"[AUDIO ERROR from {client_ip}] {error} -> Yellow LED Error Alert", flush=True)
                     self.send_error(400, str(error))
                     return
 
@@ -340,15 +354,16 @@ def make_handler(controller: VoiceCommandServer):
                 return
 
             elif self.path == "/gpio":
-                # Individual pin test toggle (Green, Relay, Yellow, Red, All)
+                # Individual pin test toggle or dynamic pattern test
                 try:
                     payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                     component = payload.get("component", "")
-                    state = bool(payload.get("state", False))
-                    result = controller.set_pin(component, state, client_ip=client_ip)
+                    state = payload.get("state", None)
+                    pattern = payload.get("pattern", None)
+                    result = controller.set_pin(component, state=state, pattern=pattern, client_ip=client_ip)
                     self._send_json(result)
                     print(
-                        f'[PIN TEST from {client_ip}] {component} -> {"ON" if state else "OFF"}',
+                        f'[PIN TEST from {client_ip}] {component} -> pattern:{pattern} state:{state}',
                         flush=True,
                     )
                 except Exception as error:
@@ -365,7 +380,7 @@ def make_handler(controller: VoiceCommandServer):
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Raspberry Pi Voice Detection and GPIO Hardware Server."
+        description="Raspberry Pi Voice Detection and Dynamic GPIO Hardware Server."
     )
     parser.add_argument(
         "--model",
@@ -388,13 +403,13 @@ def parse_arguments() -> argparse.Namespace:
         "--yellow-pin",
         type=int,
         default=27,
-        help="BCM GPIO pin for Yellow Status LED (default: 27)",
+        help="BCM GPIO pin for Yellow Status/Error Alert LED (default: 27)",
     )
     parser.add_argument(
         "--red-pin",
         type=int,
         default=17,
-        help="BCM GPIO pin for Red Error LED (default: 17)",
+        help="BCM GPIO pin for Red Voice Recording Tally LED (default: 17)",
     )
     parser.add_argument(
         "--active-low",
@@ -407,19 +422,20 @@ def parse_arguments() -> argparse.Namespace:
 def print_server_banner(host: str, port: int, model_path: str, args: argparse.Namespace) -> None:
     line = "=" * 68
     print("\n" + line)
-    print("  [*] RASPBERRY PI VOICE DETECTION & GPIO SERVER")
+    print("  [*] RASPBERRY PI VOICE DETECTION & DYNAMIC GPIO SERVER")
     print(line)
     print(f"  * Listening Address:    http://{host}:{port}")
     print(f"  * Speech Model:         {model_path}")
-    print(f"  * Green Light Pin:      BCM GPIO {args.light_pin}")
+    print(f"  * Green Command Pin:    BCM GPIO {args.light_pin} (Dynamic Recognition Burst)")
     print(f"  * 12V Relay Pin:        BCM GPIO {args.relay_pin} (Active {'Low' if args.active_low else 'High'})")
-    print(f"  * Yellow Status Pin:    BCM GPIO {args.yellow_pin}")
-    print(f"  * Red Error Pin:        BCM GPIO {args.red_pin}")
+    print(f"  * Yellow Status/Err Pin:BCM GPIO {args.yellow_pin} (Breathing Fade / Warning Strobe)")
+    print(f"  * Red Recording Pin:    BCM GPIO {args.red_pin} (Recording Tally Indicator)")
     print(line)
     print("  Endpoints:")
     print("    POST   /audio     - Send 16kHz Mono WAV recording for Vosk STT")
+    print("    POST   /recording - Notify recording state ({\"recording\": true|false})")
     print("    POST   /control   - Direct GPIO signal ({\"command\": \"ON\"|\"OFF\"})")
-    print("    POST   /gpio      - Pin test ({\"component\": \"green\"|\"relay\", \"state\": true})")
+    print("    POST   /gpio      - Pin/Pattern test ({\"component\": \"...\", \"state\": bool, \"pattern\": \"...\"})")
     print("    GET    /status    - Retrieve current pin and system status")
     print("    GET    /history   - Retrieve activity log from connected devices")
     print("    GET    /commands  - Retrieve list of recognized voice phrases")

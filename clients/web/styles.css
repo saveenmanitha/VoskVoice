@@ -658,6 +658,14 @@ input:checked + .slider.round:before {
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
 }
 
+.state-rec {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.45);
+  animation: tallyPulse 1s infinite alternate ease-in-out;
+}
+
 .hud-subtext {
   font-size: 0.78rem;
   color: var(--text-muted);
@@ -687,6 +695,18 @@ input:checked + .slider.round:before {
   opacity: 1;
 }
 
+/* Dynamic Green Recognition Burst */
+.hud-card.active-burst {
+  animation: greenCommandBurst 0.6s ease-out;
+}
+@keyframes greenCommandBurst {
+  0% { transform: scale(1); border-color: rgba(16, 185, 129, 0.4); }
+  25% { transform: scale(1.03); border-color: #34d399; box-shadow: 0 0 24px rgba(16, 185, 129, 0.6); }
+  50% { transform: scale(1); }
+  75% { transform: scale(1.02); border-color: #34d399; box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+  100% { transform: scale(1); border-color: rgba(16, 185, 129, 0.4); }
+}
+
 .hud-card.active-relay {
   border-color: rgba(56, 189, 248, 0.4);
 }
@@ -711,6 +731,59 @@ input:checked + .slider.round:before {
 .hud-card.active-status .status-glow {
   background: linear-gradient(90deg, transparent, var(--yellow-alert), transparent);
   opacity: 1;
+}
+
+/* Dynamic Yellow Breathing Fade (Unknown Command) */
+.hud-card.active-fade {
+  animation: yellowBreathingPulse 1.4s ease-in-out;
+}
+@keyframes yellowBreathingPulse {
+  0% { border-color: var(--border-subtle); box-shadow: none; }
+  35% { border-color: rgba(245, 158, 11, 0.8); box-shadow: 0 0 20px rgba(245, 158, 11, 0.4); }
+  70% { border-color: rgba(245, 158, 11, 0.4); box-shadow: 0 0 10px rgba(245, 158, 11, 0.2); }
+  100% { border-color: var(--border-subtle); box-shadow: none; }
+}
+
+/* Dynamic Yellow Rapid Warning Strobe (Rerouted System / Audio Error) */
+.hud-card.active-strobe {
+  animation: yellowRapidStrobe 0.6s steps(1, start) 2;
+}
+@keyframes yellowRapidStrobe {
+  0%, 20%, 40%, 60%, 80% {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.2);
+    box-shadow: 0 0 25px rgba(245, 158, 11, 0.7);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    border-color: var(--border-subtle);
+    background: var(--bg-surface);
+    box-shadow: none;
+  }
+}
+
+/* Dynamic Red Recording Tally (Voice Recording / Transmission) */
+.hud-card.active-recording {
+  border-color: rgba(239, 68, 68, 0.7);
+  animation: tallyCardGlow 0.8s infinite alternate ease-in-out;
+}
+.hud-card.active-recording .red-icon {
+  background: rgba(239, 68, 68, 0.3) !important;
+  color: #fca5a5 !important;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.6);
+}
+.hud-card.active-recording .red-glow {
+  background: linear-gradient(90deg, transparent, #ef4444, transparent);
+  opacity: 1 !important;
+}
+
+@keyframes tallyPulse {
+  0% { transform: scale(1); box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+  100% { transform: scale(1.05); box-shadow: 0 0 18px rgba(239, 68, 68, 0.65); }
+}
+
+@keyframes tallyCardGlow {
+  0% { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 10px rgba(239, 68, 68, 0.2); }
+  100% { box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 24px rgba(239, 68, 68, 0.5); }
 }
 
 /* Main Voice Console */

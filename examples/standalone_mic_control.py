@@ -18,17 +18,20 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.command_parser import check_light_command
+from core.led_controller import LEDController
 from core.model_resolver import resolve_model_path
 from core.relay import RelayModule
 
 
 class StandaloneVoiceLightController:
-    """Recognize local microphone speech and control GPIO outputs."""
+    """Recognize local microphone speech and control dynamic GPIO LED/relay outputs."""
 
     def __init__(
         self,
         model_path: Optional[str] = None,
         light_pin: int = 22,
+        yellow_pin: int = 27,
+        red_pin: int = 17,
         relay_pin: int = 23,
         sample_rate: int = 16000,
         device: Optional[int] = None,
@@ -43,13 +46,6 @@ class StandaloneVoiceLightController:
             raise RuntimeError(
                 "sounddevice is required for live microphone input.\n"
                 "Install it on the Raspberry Pi with: pip3 install sounddevice"
-            ) from error
-        try:
-            from gpiozero import LED
-        except ImportError as error:
-            raise RuntimeError(
-                "gpiozero is required for GPIO control.\n"
-                "Install it on the Raspberry Pi with: pip3 install gpiozero"
             ) from error
         try:
             from vosk import KaldiRecognizer, Model, SetLogLevel
@@ -68,28 +64,36 @@ class StandaloneVoiceLightController:
         self.sample_rate = sample_rate
         self.device = device
         self.recognizer = KaldiRecognizer(Model(self.resolved_model_path), sample_rate)
-        self.light = LED(light_pin)
         self.relay = RelayModule(relay_pin, active_low=active_low)
-        self.light.off()
+        self.leds = LEDController(
+            green_pin=light_pin,
+            yellow_pin=yellow_pin,
+            red_pin=red_pin,
+        )
+        self.light = self.leds.green
         self.relay.off()
+        self.leds.reset_all()
 
     def _audio_callback(self, indata, frames, time_info, status) -> None:
         if status:
             print(f"[AUDIO WARNING] {status}", file=sys.stderr)
+            self.leds.system_error_alert()
         self._audio_queue.put(bytes(indata))
 
     def _apply_command(self, transcript: str) -> None:
+        self.leds.stop_recording()
         command = check_light_command(transcript)
         if command == "ON":
-            self.light.on()
             self.relay.on()
-            print("  [ACTION] Light turned ON (Relay energized)")
+            self.leds.command_success(final_state=True)
+            print("  [ACTION] Light turned ON (Relay energized, Green dynamic burst)")
         elif command == "OFF":
-            self.light.off()
             self.relay.off()
-            print("  [ACTION] Light turned OFF (Relay opened)")
+            self.leds.command_success(final_state=False)
+            print("  [ACTION] Light turned OFF (Relay opened, Green dynamic burst)")
         else:
-            print(f"  [ACTION] Ignored: '{transcript}' is not an ON/OFF light command")
+            self.leds.command_unknown()
+            print(f"  [ACTION] Ignored: '{transcript}' is not an ON/OFF command (Yellow breathing fade)")
 
     def run(self) -> None:
         """Listen continuously until Ctrl+C and apply recognized commands."""
@@ -112,19 +116,24 @@ class StandaloneVoiceLightController:
         ):
             while True:
                 audio_data = self._audio_queue.get()
+                # Pulse Red LED tally when speech frames are being recognized
+                if not self.leds.is_recording_active():
+                    self.leds.start_recording()
+
                 if self.recognizer.AcceptWaveform(audio_data):
                     result = json.loads(self.recognizer.Result())
                     transcript = result.get("text", "").strip()
                     if transcript:
                         print(f'[TRANSCRIPT] "{transcript}"')
                         self._apply_command(transcript)
+                    else:
+                        self.leds.stop_recording()
 
     def close(self) -> None:
         """Turn actuators off and safely release GPIO resources."""
-        self.light.off()
         self.relay.off()
-        self.light.close()
         self.relay.close()
+        self.leds.close()
 
 
 def parse_arguments() -> argparse.Namespace:
