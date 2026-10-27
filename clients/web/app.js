@@ -3,10 +3,12 @@
  *
  * Implements:
  * - 16 kHz Mono 16-bit linear PCM WAV generation conforming to Vosk requirements
- * - Three execution modes: Push-to-Talk (Hold), Auto-Detect (VAD Silence), and Toggle
+ * - Three voice execution modes: Push-to-Talk (Hold), Auto-Detect (VAD Silence), and Toggle
+ * - Pure direct GPIO signal execution (/api/control) for 100% reliable quick actions
  * - Real-time 60fps Canvas Audio Visualizer & RMS Voice Level Meter
  * - Reverse Proxy Auto-Detection (/api) for zero-config local LAN mobile access
- * - Real-time GPIO State synchronization (Green LED, Relay, Status LED)
+ * - Real-time 4-channel GPIO synchronization (Green LED, Relay, Yellow LED, Red LED)
+ * - Multi-device live LAN command activity feed with client IP address tagging
  */
 
 (function () {
@@ -32,16 +34,22 @@
   const continuousToggle = document.querySelector("#continuous-toggle");
   const secureAlert = document.querySelector("#secure-context-alert");
 
-  // Hardware State Elements
+  // Hardware State Elements (4 Channels)
   const cardLight = document.querySelector("#card-light");
   const lightBadge = document.querySelector("#light-state-badge");
   const lightSubtext = document.querySelector("#light-subtext");
+
   const cardRelay = document.querySelector("#card-relay");
   const relayBadge = document.querySelector("#relay-state-badge");
   const relaySubtext = document.querySelector("#relay-subtext");
+
   const cardStatusLed = document.querySelector("#card-status-led");
   const statusLedBadge = document.querySelector("#status-led-badge");
   const statusLedSubtext = document.querySelector("#status-led-subtext");
+
+  const cardRedLed = document.querySelector("#card-red-led");
+  const redLedBadge = document.querySelector("#red-led-badge");
+  const redLedSubtext = document.querySelector("#red-led-subtext");
 
   // Voice Console Elements
   const voiceConsoleCard = document.querySelector(".voice-console-card");
@@ -103,8 +111,8 @@
   let recordTimerInterval = null;
   let silenceTimer = 0;
   let pressStartTime = 0;
-  let commandHistory = [];
   let statusPollInterval = null;
+  let historyPollInterval = null;
 
   // Visualizer Animation Frame
   let visualizerAnimFrame = null;
@@ -134,7 +142,6 @@
   }
 
   function setButtonState(state) {
-    // state: "idle" | "listening" | "recording" | "processing"
     voiceConsoleCard.classList.remove("listening", "recording", "processing");
     svgMic.classList.add("hidden");
     svgRecording.classList.add("hidden");
@@ -163,25 +170,40 @@
 
     const lightOn = Boolean(data.light_on);
     const relayOn = Boolean(data.relay_on);
-    const statusOn = Boolean(data.status_led_on);
+    const yellowOn = Boolean(data.yellow_led_on || data.status_led_on);
+    const redOn = Boolean(data.red_led_on);
 
     // Green LED (GPIO 22)
-    cardLight.classList.toggle("active-light", lightOn);
-    lightBadge.textContent = lightOn ? "ON" : "OFF";
-    lightBadge.className = `state-pill ${lightOn ? "state-on" : "state-off"}`;
-    lightSubtext.textContent = lightOn ? "Active / Illuminating" : "Standby";
+    if (cardLight && lightBadge) {
+      cardLight.classList.toggle("active-light", lightOn);
+      lightBadge.textContent = lightOn ? "ON" : "OFF";
+      lightBadge.className = `state-pill ${lightOn ? "state-on" : "state-off"}`;
+      if (lightSubtext) lightSubtext.textContent = lightOn ? "Active / Illuminating" : "Standby";
+    }
 
     // 12V Relay Module (GPIO 23)
-    cardRelay.classList.toggle("active-relay", relayOn);
-    relayBadge.textContent = relayOn ? "ON" : "OFF";
-    relayBadge.className = `state-pill ${relayOn ? "state-relay-on" : "state-off"}`;
-    relaySubtext.textContent = relayOn ? "Energized / Closed" : "Contacts Open";
+    if (cardRelay && relayBadge) {
+      cardRelay.classList.toggle("active-relay", relayOn);
+      relayBadge.textContent = relayOn ? "ON" : "OFF";
+      relayBadge.className = `state-pill ${relayOn ? "state-relay-on" : "state-off"}`;
+      if (relaySubtext) relaySubtext.textContent = relayOn ? "Energized / Closed" : "Contacts Open";
+    }
 
     // Status Yellow LED (GPIO 27)
-    cardStatusLed.classList.toggle("active-status", statusOn);
-    statusLedBadge.textContent = statusOn ? "ALERT" : "IDLE";
-    statusLedBadge.className = `state-pill ${statusOn ? "state-alert" : "state-idle"}`;
-    statusLedSubtext.textContent = statusOn ? "Unrecognized Command" : "Normal";
+    if (cardStatusLed && statusLedBadge) {
+      cardStatusLed.classList.toggle("active-status", yellowOn);
+      statusLedBadge.textContent = yellowOn ? "ALERT" : "IDLE";
+      statusLedBadge.className = `state-pill ${yellowOn ? "state-alert" : "state-idle"}`;
+      if (statusLedSubtext) statusLedSubtext.textContent = yellowOn ? "Unrecognized Command" : "Normal";
+    }
+
+    // Red Error LED (GPIO 17)
+    if (cardRedLed && redLedBadge) {
+      cardRedLed.classList.toggle("active-status", redOn);
+      redLedBadge.textContent = redOn ? "ALERT" : "OFF";
+      redLedBadge.className = `state-pill ${redOn ? "state-alert" : "state-off"}`;
+      if (redLedSubtext) redLedSubtext.textContent = redOn ? "Error Alert" : "Normal";
+    }
   }
 
   function updateResult(result, latencyMs) {
@@ -203,36 +225,56 @@
     if (latencyMs) {
       executionTimeTag.textContent = `${latencyMs}ms`;
     }
-
-    // Add to history
-    addHistoryItem({
-      transcript: result.transcript || "(Silence)",
-      command: cmd,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    });
   }
 
-  function addHistoryItem(item) {
-    commandHistory.unshift(item);
-    if (commandHistory.length > 8) commandHistory.pop();
-    renderHistory();
+  /**
+   * Multi-Device Activity Log
+   * Receives commands executed across all connected phones and computers with their IP tags.
+   */
+  async function pollMultiDeviceHistory() {
+    try {
+      const res = await fetch(getApiEndpoint("/history"), { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const items = await res.json();
+        renderMultiDeviceHistory(items);
+      }
+    } catch (_) {}
   }
 
-  function renderHistory() {
-    if (!commandHistory.length) {
-      historyList.innerHTML = '<li class="history-empty">No commands executed yet.</li>';
+  function renderMultiDeviceHistory(items) {
+    if (!items || !items.length) {
+      historyList.innerHTML = '<li class="history-empty">No commands executed yet from local devices.</li>';
       return;
     }
 
-    historyList.innerHTML = commandHistory.map(item => `
-      <li class="history-item">
-        <div class="history-item-left">
-          <span class="action-badge ${item.command === 'ON' ? 'badge-on' : item.command === 'OFF' ? 'badge-off' : 'badge-unknown'}" style="font-size:0.72rem; padding: 2px 7px;">${item.command}</span>
-          <span class="history-transcript" title="${item.transcript}">“${item.transcript}”</span>
-        </div>
-        <span class="history-time">${item.time}</span>
-      </li>
-    `).join("");
+    historyList.innerHTML = items.map(item => {
+      let typeClass = "type-voice";
+      let typeLabel = "VOICE";
+      if (item.type === "DIRECT_GPIO") {
+        typeClass = "type-gpio";
+        typeLabel = "DIRECT GPIO";
+      } else if (item.type === "PIN_TEST") {
+        typeClass = "type-test";
+        typeLabel = "PIN TEST";
+      }
+
+      let cmdClass = item.command === "ON" ? "badge-on" : item.command === "OFF" ? "badge-off" : "badge-unknown";
+
+      return `
+        <li class="history-item">
+          <div class="history-item-left">
+            <span class="ip-badge" title="Source Device IP">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+              ${item.client_ip || "Local Device"}
+            </span>
+            <span class="type-badge ${typeClass}">${typeLabel}</span>
+            <span class="action-badge ${cmdClass}" style="font-size:0.72rem; padding: 2px 7px;">${item.command}</span>
+            <span class="history-transcript" title="${item.transcript}">“${item.transcript}”</span>
+          </div>
+          <span class="history-time">${item.time}</span>
+        </li>
+      `;
+    }).join("");
   }
 
   /**
@@ -257,19 +299,18 @@
 
     // fmt sub-chunk (16-bit PCM)
     writeString(12, "fmt ");
-    view.setUint32(16, 16, true);          // Subchunk1Size (16 for PCM)
-    view.setUint16(20, 1, true);           // AudioFormat (1 = PCM)
-    view.setUint16(22, 1, true);           // NumChannels (1 = Mono)
-    view.setUint32(24, sampleRate, true);  // SampleRate (16000)
-    view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
-    view.setUint16(32, 2, true);           // BlockAlign (NumChannels * BitsPerSample/8)
-    view.setUint16(34, 16, true);          // BitsPerSample (16-bit)
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
 
     // data sub-chunk
     writeString(36, "data");
     view.setUint32(40, samples.length * 2, true);
 
-    // Write 16-bit linear PCM samples
     let offset = 44;
     for (let i = 0; i < samples.length; i++) {
       const s = Math.max(-1, Math.min(1, samples[i]));
@@ -281,7 +322,6 @@
   }
 
   function resampleAudioBuffer(rawChunks, sourceSampleRate, targetSampleRate) {
-    // Flatten raw chunks
     let totalLength = 0;
     for (let chunk of rawChunks) totalLength += chunk.length;
     const merged = new Float32Array(totalLength);
@@ -295,7 +335,6 @@
       return merged;
     }
 
-    // Linear interpolation resampler
     const ratio = sourceSampleRate / targetSampleRate;
     const newLength = Math.round(totalLength / ratio);
     const result = new Float32Array(newLength);
@@ -348,7 +387,6 @@
       analyserNode.smoothingTimeConstant = 0.6;
       sourceNode.connect(analyserNode);
 
-      // ScriptProcessorNode for universally compatible raw PCM capture
       processorNode = audioContext.createScriptProcessor(2048, 1, 1);
       processorNode.onaudioprocess = handleAudioProcess;
       sourceNode.connect(processorNode);
@@ -362,28 +400,21 @@
     }
   }
 
-  /**
-   * Real-time audio processing loop for volume calculation, VAD, and recording.
-   */
   function handleAudioProcess(event) {
     const input = event.inputBuffer.getChannelData(0);
 
-    // Compute Root-Mean-Square (RMS) amplitude
     let sum = 0;
     for (let i = 0; i < input.length; i++) {
       sum += input[i] * input[i];
     }
     const rms = Math.sqrt(sum / input.length);
 
-    // Update real-time level meter
     const meterPct = Math.min(100, Math.round((rms / 0.15) * 100));
     meterLevel.style.width = `${meterPct}%`;
 
-    // Active Recording: accumulate chunks
     if (isRecording) {
       pcmChunks.push(new Float32Array(input));
 
-      // Auto-Detect (VAD) silence handling
       if (currentMode === "vad") {
         const frameDuration = input.length / audioContext.sampleRate;
         if (rms >= vadThreshold) {
@@ -398,7 +429,6 @@
         }
       }
     } else if (isListening && currentMode === "vad") {
-      // Waiting for speech onset
       if (rms >= vadThreshold) {
         startRecordingChunk();
         speechDetected = true;
@@ -408,9 +438,6 @@
     }
   }
 
-  /**
-   * Canvas Audio Waveform / Frequency Visualizer (60fps)
-   */
   function startVisualizer() {
     if (!visualizerCanvas || !canvasCtx || !analyserNode) return;
     const bufferLength = analyserNode.frequencyBinCount;
@@ -435,7 +462,6 @@
         const val = dataArray[dataIndex] || 0;
         const normalized = val / 255;
 
-        // Dynamic height based on recording state
         let barHeight = Math.max(4, normalized * (height * 0.7));
         if (!isRecording && !isListening) {
           barHeight = 4;
@@ -476,7 +502,6 @@
     setButtonState("recording");
     if (navigator.vibrate) navigator.vibrate(40);
 
-    // Start timer counter
     clearInterval(recordTimerInterval);
     recordTimerInterval = setInterval(() => {
       const elapsed = ((Date.now() - recordStartTime) / 1000).toFixed(1);
@@ -522,6 +547,7 @@
       const result = await response.json();
       updateResult(result, latency);
       updateHardwareHUD(result);
+      pollMultiDeviceHistory();
 
       if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
       setStatusMessage("Command Executed!", `“${result.transcript}” → ${result.command}`);
@@ -568,7 +594,6 @@
     connectionPill.className = "connection-pill connecting";
     connectionLabel.textContent = "Connecting...";
 
-    // First check if laptop proxy (/api) is available
     try {
       const proxyCheck = await fetch("/api/status", { signal: AbortSignal.timeout(2500) });
       if (proxyCheck.ok) {
@@ -581,7 +606,6 @@
       useProxy = false;
     }
 
-    // Direct Pi connection
     serverBaseUrl = serverInput.value.trim().replace(/\/+$/, "");
     if (!/^https?:\/\/.+/i.test(serverBaseUrl)) {
       connectionPill.className = "connection-pill disconnected";
@@ -616,9 +640,12 @@
     updateHardwareHUD(data);
     updatePromptForCurrentMode();
 
-    // Start background status poller
     if (!statusPollInterval) {
-      statusPollInterval = setInterval(pollServerStatus, 4000);
+      statusPollInterval = setInterval(pollServerStatus, 3500);
+    }
+    if (!historyPollInterval) {
+      pollMultiDeviceHistory();
+      historyPollInterval = setInterval(pollMultiDeviceHistory, 2000);
     }
   }
 
@@ -634,37 +661,36 @@
   }
 
   /**
-   * Quick Commands (Light ON, OFF, Sync)
+   * Pure Direct GPIO Signal Execution
+   * Gives an immediate, deterministic electrical signal directly to the GPIO pins,
+   * completely separate from Vosk speech recognition.
    */
-  async function sendQuickAction(command) {
+  async function sendDirectSignal(command) {
     showError("");
     setButtonState("processing");
-    setStatusMessage(`Sending ${command} command...`, "Transmitting to Pi");
+    setStatusMessage(`Sending Pure GPIO Signal (${command})...`, "Direct electrical signal to pins");
 
     try {
       const startTime = Date.now();
-      let res;
+      const endpoint = getApiEndpoint("/control");
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      });
 
-      if (useProxy) {
-        res = await fetch("/api/quick", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command }),
-        });
-      } else {
-        // Direct status query or audio fallback
-        res = await fetch(`${serverBaseUrl}/status`);
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
       }
 
-      if (res && res.ok) {
-        const data = await res.json();
-        const latency = Date.now() - startTime;
-        updateResult(data, latency);
-        updateHardwareHUD(data);
-        setStatusMessage("Action Completed", data.message);
-      }
+      const data = await res.json();
+      const latency = Date.now() - startTime;
+      updateResult(data, latency);
+      updateHardwareHUD(data);
+      pollMultiDeviceHistory();
+      setStatusMessage("Direct GPIO Signal Executed", data.message);
     } catch (err) {
-      showError(`Quick action failed: ${err.message}`);
+      showError(`Direct GPIO command failed: ${err.message}`);
     } finally {
       resetVoiceState();
     }
@@ -674,7 +700,6 @@
    * Event Listeners Setup
    */
   function setupEventListeners() {
-    // Mode Switcher Tabs
     modeTabs.forEach(tab => {
       tab.addEventListener("click", () => {
         modeTabs.forEach(t => {
@@ -689,7 +714,6 @@
       });
     });
 
-    // Push-to-Talk (Hold-to-Talk) Handlers
     micButton.addEventListener("pointerdown", async (e) => {
       e.preventDefault();
       if (!isConnected || isProcessing) return;
@@ -710,7 +734,6 @@
         micButton.classList.remove("is-held");
         const duration = Date.now() - pressStartTime;
         if (duration < 250) {
-          // Accidental click
           resetVoiceState();
           showError("Press and hold the button while speaking a command.");
           return;
@@ -722,7 +745,6 @@
     window.addEventListener("pointerup", releasePTT);
     window.addEventListener("pointercancel", releasePTT);
 
-    // Keyboard Spacebar Hold-to-Talk
     window.addEventListener("keydown", async (e) => {
       if (e.code === "Space" && currentMode === "ptt" && !e.repeat) {
         const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
@@ -749,10 +771,9 @@
       }
     });
 
-    // Auto-Detect (VAD) & Toggle Click Handlers
     micButton.addEventListener("click", async () => {
       if (!isConnected || isProcessing) return;
-      if (currentMode === "ptt") return; // Handled by pointerdown/up
+      if (currentMode === "ptt") return;
 
       const audioOk = await initAudioEngine();
       if (!audioOk) return;
@@ -776,18 +797,19 @@
       }
     });
 
-    // Quick Actions
-    quickOnBtn.addEventListener("click", () => sendQuickAction("ON"));
-    quickOffBtn.addEventListener("click", () => sendQuickAction("OFF"));
-    quickSyncBtn.addEventListener("click", pollServerStatus);
+    // Pure Direct GPIO Quick Action buttons (bypasses Vosk completely)
+    quickOnBtn.addEventListener("click", () => sendDirectSignal("ON"));
+    quickOffBtn.addEventListener("click", () => sendDirectSignal("OFF"));
+    quickSyncBtn.addEventListener("click", () => {
+      pollServerStatus();
+      pollMultiDeviceHistory();
+    });
 
-    // Settings Panel Toggles
     toggleSettingsBtn.addEventListener("click", () => settingsPanel.classList.toggle("hidden"));
     closeSettingsBtn.addEventListener("click", () => settingsPanel.classList.add("hidden"));
     connectionPill.addEventListener("click", () => settingsPanel.classList.toggle("hidden"));
     connectButton.addEventListener("click", connectToServer);
 
-    // Settings Sliders
     vadThresholdInput.addEventListener("input", (e) => {
       vadThreshold = parseFloat(e.target.value);
       vadThresholdVal.textContent = vadThreshold.toFixed(3);
@@ -803,14 +825,58 @@
       isContinuous = e.target.checked;
     });
 
-    // Dismiss Error
     dismissErrorBtn.addEventListener("click", () => showError(""));
-    clearHistoryBtn.addEventListener("click", () => {
-      commandHistory = [];
-      renderHistory();
+    clearHistoryBtn.addEventListener("click", async () => {
+      try {
+        await fetch(getApiEndpoint("/history"), { method: "DELETE" });
+        renderMultiDeviceHistory([]);
+      } catch (_) {}
     });
 
-    // Check Secure Context on mobile
+    // Help Modal Window Handlers
+    const openHelpModalBtn = document.querySelector("#open-help-modal-btn");
+    const closeHelpModalBtn = document.querySelector("#close-help-modal-btn");
+    const helpModal = document.querySelector("#help-modal");
+
+    if (openHelpModalBtn && helpModal) {
+      openHelpModalBtn.addEventListener("click", () => {
+        helpModal.classList.remove("hidden");
+      });
+    }
+
+    if (closeHelpModalBtn && helpModal) {
+      closeHelpModalBtn.addEventListener("click", () => {
+        helpModal.classList.add("hidden");
+      });
+    }
+
+    if (helpModal) {
+      helpModal.addEventListener("click", (e) => {
+        if (e.target === helpModal) {
+          helpModal.classList.add("hidden");
+        }
+      });
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !helpModal.classList.contains("hidden")) {
+          helpModal.classList.add("hidden");
+        }
+      });
+    }
+
+    // Example Chips in Help Window
+    document.querySelectorAll(".example-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const phrase = chip.dataset.phrase || chip.textContent.replace(/[“”"]/g, "").trim();
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(phrase).catch(() => {});
+        }
+        setStatusMessage(null, `Try saying: “${phrase}”`);
+        const originalText = chip.textContent;
+        chip.textContent = "Copied ✓";
+        setTimeout(() => { chip.textContent = originalText; }, 1200);
+      });
+    });
+
     if (window.isSecureContext === false && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
       secureAlert.classList.remove("hidden");
     }

@@ -58,6 +58,26 @@
       </div>
     </header>
 
+    <!-- Navigation between Voice Controller, Diagnostics, and Help -->
+    <nav class="nav-tabs" aria-label="Page Navigation">
+      <a href="index.html" class="nav-tab-link active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        <span>Voice Controller</span>
+      </a>
+      <a href="test.html" class="nav-tab-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Hardware Diagnostics (GPIO Pins)</span>
+      </a>
+      <a href="help.html" class="nav-tab-link">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Commands &amp; Help</span>
+      </a>
+      <button id="open-help-modal-btn" class="nav-tab-link" style="background: rgba(124, 58, 237, 0.15); color: #c084fc; border: 1px solid rgba(124, 58, 237, 0.3); cursor: pointer;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Example Phrases Window</span>
+      </button>
+    </nav>
+
     <!-- Collapsible Settings & Network Panel -->
     <section id="settings-panel" class="settings-card hidden" aria-label="Settings configuration">
       <div class="settings-header">
@@ -189,6 +209,28 @@
         </div>
         <div class="hud-glow-indicator status-glow"></div>
       </div>
+
+      <!-- Red Error LED Card -->
+      <div id="card-red-led" class="hud-card">
+        <div class="hud-card-header">
+          <div class="hud-icon-wrap" style="background: rgba(239, 68, 68, 0.12); color: #f87171;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <span class="hud-pin-badge">GPIO 17</span>
+        </div>
+        <div class="hud-card-body">
+          <span class="hud-label">Red Error LED</span>
+          <div class="hud-state-row">
+            <span id="red-led-badge" class="state-pill state-off">OFF</span>
+            <span id="red-led-subtext" class="hud-subtext">Normal</span>
+          </div>
+        </div>
+        <div class="hud-glow-indicator" style="background: linear-gradient(90deg, transparent, #ef4444, transparent);"></div>
+      </div>
     </section>
 
     <!-- Main Voice Execution Console -->
@@ -315,14 +357,20 @@
         </div>
       </div>
 
-      <!-- Recent Command History Feed -->
+      <!-- Multi-Device Command Activity Feed -->
       <div class="history-card">
         <div class="history-card-header">
-          <h2>Command Activity</h2>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2>All Network Devices Activity</h2>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 0.65rem;">Live LAN</span>
+          </div>
           <button id="clear-history-btn" class="text-btn">Clear</button>
         </div>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -8px;">
+          Live commands across all phones &amp; devices on Wi-Fi with client IP addresses.
+        </p>
         <ul id="history-list" class="history-list">
-          <li class="history-empty">No commands executed yet.</li>
+          <li class="history-empty">Listening for commands from local devices...</li>
         </ul>
       </div>
     </section>
@@ -331,6 +379,67 @@
     <footer class="app-footer">
       <p>Offline Voice STT model: <span class="code-tag">vosk-model-small-en-us-0.15</span> &bull; 16 kHz Mono Audio &bull; LAN Web Client</p>
     </footer>
+
+    <!-- Interactive Voice Commands Help Modal Window -->
+    <div id="help-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h2 id="help-modal-title">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            Voice Command Examples
+          </h2>
+          <button id="close-help-modal-btn" class="close-btn" aria-label="Close help window">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.45;">
+            The speech engine understands extensive phrasing aliases and natural variations. Tap any chip below to copy or practice speaking:
+          </p>
+
+          <!-- Turn ON Aliases -->
+          <div class="modal-category">
+            <div class="modal-category-title">
+              <span style="color: #34d399; font-weight: 700;">🟢 "TURN ON" Command Aliases</span>
+              <span class="badge badge-on" style="font-size: 0.65rem;">Action: ON</span>
+            </div>
+            <div class="example-chips-group">
+              <button class="example-chip on-chip" data-phrase="turn on the light">“turn on the light”</button>
+              <button class="example-chip on-chip" data-phrase="lights on">“lights on”</button>
+              <button class="example-chip on-chip" data-phrase="switch on the lights">“switch on the lights”</button>
+              <button class="example-chip on-chip" data-phrase="power on the light">“power on the light”</button>
+              <button class="example-chip on-chip" data-phrase="illuminate">“illuminate”</button>
+              <button class="example-chip on-chip" data-phrase="put on the light">“put on the light”</button>
+              <button class="example-chip on-chip" data-phrase="activate relay">“activate relay”</button>
+              <button class="example-chip on-chip" data-phrase="turn it on please">“turn it on please”</button>
+            </div>
+          </div>
+
+          <!-- Turn OFF Aliases -->
+          <div class="modal-category">
+            <div class="modal-category-title">
+              <span style="color: #f87171; font-weight: 700;">🔴 "TURN OFF" Command Aliases</span>
+              <span class="badge badge-off" style="font-size: 0.65rem;">Action: OFF</span>
+            </div>
+            <div class="example-chips-group">
+              <button class="example-chip off-chip" data-phrase="turn off the light">“turn off the light”</button>
+              <button class="example-chip off-chip" data-phrase="lights off">“lights off”</button>
+              <button class="example-chip off-chip" data-phrase="switch off the light">“switch off the light”</button>
+              <button class="example-chip off-chip" data-phrase="shut off the lights">“shut off the lights”</button>
+              <button class="example-chip off-chip" data-phrase="lights out">“lights out”</button>
+              <button class="example-chip off-chip" data-phrase="power down">“power down”</button>
+              <button class="example-chip off-chip" data-phrase="kill the lights">“kill the lights”</button>
+              <button class="example-chip off-chip" data-phrase="goodnight">“goodnight”</button>
+              <button class="example-chip off-chip" data-phrase="turn it off please">“turn it off please”</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Tip: Hold Spacebar or Mic button to talk.</span>
+          <a href="help.html" class="nav-tab-link" style="font-size: 0.78rem; padding: 5px 12px;">Open Full Guide &rarr;</a>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
