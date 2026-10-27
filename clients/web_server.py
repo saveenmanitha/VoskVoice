@@ -1,11 +1,11 @@
-"""Local network web server and proxy for the Vosk Raspberry Pi Voice Controller.
+"""Local network web server and reverse proxy for the Vosk Raspberry Pi Voice Controller.
 
-This server hosts the modern web client and acts as a local proxy between client
-devices (smartphones, tablets, laptops) on your local network and the Raspberry Pi.
-
-By proxying API calls, it eliminates browser Mixed Content (HTTPS/HTTP) blocks,
-solves CORS issues, and enables secure microphone access (WebRTC/getUserMedia)
-across all devices on your Wi-Fi network.
+Features:
+- Proxies API calls to the Pi, eliminating CORS and Mixed Content blocks.
+- Pure direct GPIO signals for quick action buttons (/api/control), bypassing Vosk speech recognition.
+- Individual component pin control (/api/gpio) for Green LED, Relay, Yellow LED, and Red LED.
+- Unified multi-device activity feed (/api/history) showing commands from all connected local IPs.
+- Automatic LAN IP detection and self-signed SSL certificate generation for mobile microphone access.
 """
 
 import argparse
@@ -16,8 +16,10 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
@@ -32,6 +34,7 @@ if sys.stdout.encoding != "utf-8":
 
 # Root and client directories
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 WEB_DIR = PROJECT_ROOT / "clients" / "web"
 AUDIO_DIR = PROJECT_ROOT / "audio"
 DEFAULT_CERTS_DIR = PROJECT_ROOT / "certs"
@@ -40,7 +43,6 @@ DEFAULT_CERTS_DIR = PROJECT_ROOT / "certs"
 def get_local_ip_addresses() -> list[str]:
     """Return all non-loopback IPv4 addresses for this machine."""
     ips = set()
-    # Strategy 1: Connect to an external address via UDP socket
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -50,7 +52,6 @@ def get_local_ip_addresses() -> list[str]:
     except OSError:
         pass
 
-    # Strategy 2: Query getaddrinfo for local hostname
     try:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
@@ -107,10 +108,34 @@ class MockPiState:
     def __init__(self) -> None:
         self.light_on = False
         self.relay_on = False
-        self.status_led_on = False
+        self.yellow_led_on = False
+        self.red_led_on = False
         self.last_transcript = ""
         self.last_command = "OFF"
         self.message = "System ready (Mock Mode)"
+        self.history: list[dict] = []
+
+    def add_history(
+        self,
+        client_ip: str,
+        action_type: str,
+        transcript: str,
+        command: str,
+        message: str,
+    ) -> dict:
+        entry = {
+            "id": f"{int(time.time() * 1000)}",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "client_ip": client_ip or "Local Device",
+            "type": action_type,
+            "transcript": transcript,
+            "command": command,
+            "message": message,
+        }
+        self.history.insert(0, entry)
+        if len(self.history) > 50:
+            self.history.pop()
+        return entry
 
     def get_status(self) -> dict:
         return {
@@ -118,27 +143,95 @@ class MockPiState:
             "command": self.last_command,
             "light_on": self.light_on,
             "relay_on": self.relay_on,
-            "status_led_on": self.status_led_on,
+            "yellow_led_on": self.yellow_led_on,
+            "status_led_on": self.yellow_led_on,
+            "red_led_on": self.red_led_on,
             "message": self.message,
             "mock": True,
         }
 
-    def process_command(self, transcript: str, command: str) -> dict:
+    def process_command(
+        self, transcript: str, command: str, client_ip: str = "Unknown"
+    ) -> dict:
         self.last_transcript = transcript
         self.last_command = command
         if command == "ON":
             self.light_on = True
             self.relay_on = True
-            self.status_led_on = False
+            self.yellow_led_on = False
+            self.red_led_on = False
             self.message = "Light turned on (simulated)"
         elif command == "OFF":
             self.light_on = False
             self.relay_on = False
-            self.status_led_on = False
+            self.yellow_led_on = False
+            self.red_led_on = False
             self.message = "Light turned off (simulated)"
         else:
-            self.status_led_on = True
+            self.yellow_led_on = True
+            self.red_led_on = False
             self.message = "No supported light command recognized (simulated)"
+
+        self.add_history(client_ip, "VOICE", transcript, command, self.message)
+        return self.get_status()
+
+    def set_direct(self, command: str, client_ip: str = "Unknown") -> dict:
+        cmd = command.upper()
+        if cmd == "ON":
+            self.light_on = True
+            self.relay_on = True
+            self.yellow_led_on = False
+            self.red_led_on = False
+            self.message = "Light turned on (pure GPIO signal)"
+        elif cmd == "OFF":
+            self.light_on = False
+            self.relay_on = False
+            self.yellow_led_on = False
+            self.red_led_on = False
+            self.message = "Light turned off (pure GPIO signal)"
+        else:
+            self.message = f"Unknown direct command: {command}"
+
+        self.last_transcript = f"Pure Signal: {cmd}"
+        self.last_command = cmd
+        self.add_history(
+            client_ip, "DIRECT_GPIO", f"Pure Signal: Light {cmd}", cmd, self.message
+        )
+        return self.get_status()
+
+    def set_pin(
+        self, component: str, state: bool, client_ip: str = "Unknown"
+    ) -> dict:
+        comp = component.lower().strip()
+        state_str = "ON" if state else "OFF"
+
+        if comp in ("green", "light"):
+            self.light_on = state
+            name = "Green LED"
+        elif comp == "relay":
+            self.relay_on = state
+            name = "12V Relay"
+        elif comp in ("yellow", "status"):
+            self.yellow_led_on = state
+            name = "Yellow LED"
+        elif comp in ("red", "error"):
+            self.red_led_on = state
+            name = "Red Error LED"
+        elif comp == "all":
+            self.light_on = state
+            self.relay_on = state
+            self.yellow_led_on = state
+            self.red_led_on = state
+            name = "All Hardware Pins"
+        else:
+            name = component
+
+        self.message = f"{name} set to {state_str} (simulated)"
+        self.last_transcript = f"Test Pin: {name}"
+        self.last_command = state_str
+        self.add_history(
+            client_ip, "PIN_TEST", f"Test: {name} {state_str}", state_str, self.message
+        )
         return self.get_status()
 
 
@@ -149,6 +242,23 @@ def create_request_handler(
 ):
     current_pi_url = [target_pi_url.rstrip("/")]
     mock_state = MockPiState() if mock_mode else None
+    # Shared multi-client history kept on the web server as well
+    server_history: list[dict] = []
+
+    def record_history(client_ip: str, action_type: str, transcript: str, command: str, message: str):
+        entry = {
+            "id": f"{int(time.time() * 1000)}",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "client_ip": client_ip or "Local Device",
+            "type": action_type,
+            "transcript": transcript,
+            "command": command,
+            "message": message,
+        }
+        server_history.insert(0, entry)
+        if len(server_history) > 60:
+            server_history.pop()
+        return entry
 
     class WebClientRequestHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -157,13 +267,13 @@ def create_request_handler(
         def _send_cors_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header(
-                "Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT"
+                "Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, PUT"
             )
             self.send_header(
                 "Access-Control-Allow-Headers", "Content-Type, X-Requested-With"
             )
 
-        def _send_json_response(self, data: dict, status: int = 200) -> None:
+        def _send_json_response(self, data: object, status: int = 200) -> None:
             payload = json.dumps(data).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -184,19 +294,43 @@ def create_request_handler(
             elif self.path == "/api/config":
                 self._handle_get_config()
                 return
+            elif self.path == "/api/history":
+                self._handle_get_history()
+                return
+            elif self.path == "/api/commands":
+                from core.command_parser import get_command_examples
+                self._send_json_response(get_command_examples())
+                return
 
             # Default to serving static files from clients/web
             super().do_GET()
 
+        def do_DELETE(self) -> None:
+            if self.path == "/api/history":
+                server_history.clear()
+                if mock_state:
+                    mock_state.history.clear()
+                self._send_json_response({"success": True, "message": "History cleared"})
+                return
+            self.send_error(404, "Endpoint not found")
+
         def do_POST(self) -> None:
+            client_ip = self.client_address[0]
             if self.path == "/api/audio":
-                self._handle_post_audio()
+                self._handle_post_audio(client_ip)
+                return
+            elif self.path == "/api/control":
+                self._handle_post_control(client_ip)
+                return
+            elif self.path == "/api/gpio":
+                self._handle_post_gpio(client_ip)
                 return
             elif self.path == "/api/config":
                 self._handle_post_config()
                 return
             elif self.path == "/api/quick":
-                self._handle_post_quick()
+                # Forward to direct control for 100% reliable GPIO signaling
+                self._handle_post_control(client_ip)
                 return
 
             self.send_error(404, "Endpoint not found")
@@ -225,6 +359,24 @@ def create_request_handler(
                     },
                     status=502,
                 )
+
+        def _handle_get_history(self) -> None:
+            if mock_state is not None:
+                self._send_json_response(mock_state.history)
+                return
+
+            # Try reading history from Pi server
+            url = f"{current_pi_url[0]}/history"
+            req = urllib.request.Request(url, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    # Merge any web server history entries
+                    self._send_json_response(data)
+                    return
+            except Exception:
+                # Fallback to web server's multi-device history
+                self._send_json_response(server_history)
 
         def _handle_get_config(self) -> None:
             self._send_json_response(
@@ -257,7 +409,90 @@ def create_request_handler(
             except Exception as err:
                 self._send_json_response({"error": str(err)}, status=400)
 
-        def _handle_post_audio(self) -> None:
+        def _handle_post_control(self, client_ip: str) -> None:
+            """Pure direct GPIO signal to turn lights ON or OFF."""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                command = body.get("command", "ON").upper()
+            except Exception:
+                command = "ON"
+
+            if mock_state is not None:
+                res = mock_state.set_direct(command, client_ip=client_ip)
+                self._send_json_response(res)
+                return
+
+            # Forward to Pi server's /control endpoint
+            url = f"{current_pi_url[0]}/control"
+            payload = json.dumps({"command": command}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=6) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    record_history(
+                        client_ip,
+                        "DIRECT_GPIO",
+                        f"Pure Signal: Light {command}",
+                        command,
+                        data.get("message", "Light command executed"),
+                    )
+                    self._send_json_response(data, status=response.status)
+            except Exception as err:
+                # If Pi has older server without /control, fallback gracefully
+                self._send_json_response(
+                    {"error": f"Failed to execute direct GPIO command on Pi: {err}"},
+                    status=502,
+                )
+
+        def _handle_post_gpio(self, client_ip: str) -> None:
+            """Individual pin test toggle for Green, Relay, Yellow, or Red."""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                component = body.get("component", "green")
+                state = bool(body.get("state", False))
+            except Exception as err:
+                self._send_json_response({"error": f"Invalid GPIO body: {err}"}, status=400)
+                return
+
+            if mock_state is not None:
+                res = mock_state.set_pin(component, state, client_ip=client_ip)
+                self._send_json_response(res)
+                return
+
+            # Forward to Pi /gpio endpoint
+            url = f"{current_pi_url[0]}/gpio"
+            payload = json.dumps({"component": component, "state": state}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=6) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    record_history(
+                        client_ip,
+                        "PIN_TEST",
+                        f"Pin Test: {component} {'ON' if state else 'OFF'}",
+                        "TEST",
+                        data.get("message", "Pin updated"),
+                    )
+                    self._send_json_response(data, status=response.status)
+            except Exception as err:
+                self._send_json_response(
+                    {"error": f"Failed to execute GPIO pin test on Pi: {err}"},
+                    status=502,
+                )
+
+        def _handle_post_audio(self, client_ip: str) -> None:
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 if length <= 0:
@@ -273,9 +508,10 @@ def create_request_handler(
                 return
 
             if mock_state is not None:
-                # In mock mode, detect if it's likely a command or return simulated ON
                 res = mock_state.process_command(
-                    "turn on the light", "ON" if not mock_state.light_on else "OFF"
+                    "turn on the light",
+                    "ON" if not mock_state.light_on else "OFF",
+                    client_ip=client_ip,
                 )
                 self._send_json_response(res)
                 return
@@ -292,6 +528,13 @@ def create_request_handler(
                 with urllib.request.urlopen(req, timeout=12) as response:
                     body = response.read()
                     data = json.loads(body.decode("utf-8"))
+                    record_history(
+                        client_ip,
+                        "VOICE",
+                        data.get("transcript", ""),
+                        data.get("command", "UNKNOWN"),
+                        data.get("message", ""),
+                    )
                     self._send_json_response(data, status=response.status)
             except urllib.error.HTTPError as err:
                 err_body = err.read().decode("utf-8", errors="replace")
@@ -306,61 +549,7 @@ def create_request_handler(
                     status=502,
                 )
 
-        def _handle_post_quick(self) -> None:
-            """Execute a quick command using sample WAV files or direct action."""
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                cmd = payload.get("command", "").upper()
-            except Exception:
-                cmd = "ON"
-
-            sample_file = None
-            if cmd == "ON":
-                for name in ["lights_on.wav", "light on.wav", "turn on.wav"]:
-                    p = AUDIO_DIR / name
-                    if p.exists():
-                        sample_file = p
-                        break
-            elif cmd == "OFF":
-                for name in ["lights off.wav", "light off.wav", "turn off.wav"]:
-                    p = AUDIO_DIR / name
-                    if p.exists():
-                        sample_file = p
-                        break
-
-            if sample_file and sample_file.exists():
-                audio_bytes = sample_file.read_bytes()
-                if mock_state is not None:
-                    res = mock_state.process_command(
-                        "turn on the light" if cmd == "ON" else "turn off the light",
-                        cmd,
-                    )
-                    self._send_json_response(res)
-                    return
-
-                # Send sample WAV to Pi
-                url = f"{current_pi_url[0]}/audio"
-                req = urllib.request.Request(
-                    url,
-                    data=audio_bytes,
-                    headers={"Content-Type": "audio/wav"},
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=10) as response:
-                        data = json.loads(response.read().decode("utf-8"))
-                        self._send_json_response(data, status=response.status)
-                except Exception as err:
-                    self._send_json_response({"error": str(err)}, status=502)
-            else:
-                self._send_json_response(
-                    {"error": f"No audio sample available for command: {cmd}"},
-                    status=404,
-                )
-
         def log_message(self, format: str, *args) -> None:
-            # Clean logging
             sys.stderr.write(f"[WEB SERVER] {format % args}\n")
 
     return WebClientRequestHandler
@@ -401,7 +590,9 @@ def print_banner(
         print(f"  2. Open {protocol}://{local_ips[0] if local_ips else host}:{port}")
         print("     Note: To record microphone on mobile devices, run with --ssl")
         print("     or enable insecure origin in chrome://flags.")
-    print("  4. Press and hold the mic button or use Auto-Detect to control the light!")
+    print("  4. Voice Controller:  /index.html")
+    print("  5. Pin Control Suite: /test.html")
+    print("  6. Commands & Help:   /help.html")
     print(line + "\n")
 
 
