@@ -213,10 +213,10 @@ The command examples below assume the repository is located at
 | --- | --- | --- |
 | Pi microphone | Raspberry Pi | `python -m examples.live_microphone_controller` |
 | Laptop Python client | Laptop | `python -m clients.network_voice_client ...` |
-| Browser | Laptop/browser | Start the Pi server and open `clients/web` |
+| Web Client (LAN / Any Device) | Smartphone / Tablet / Laptop | `python clients/web_server.py --pi http://<pi-ip>:8765` |
 
 Start with **Mode 1** to verify the GPIO circuit. Use **Mode 2** or **Mode 3**
-when the microphone must remain connected to a laptop.
+when the microphone must remain connected to a laptop or mobile devices on your Wi-Fi.
 
 ## Mode 1: Pi microphone
 
@@ -353,40 +353,97 @@ python -m clients.network_voice_client \
     --device 2
 ```
 
-## Mode 3: Browser interface
+## Mode 3: Modern Web Client (Local Network & Mobile Access)
 
-The browser interface uses the same Pi server as Mode 2. It requires a current
-Chrome, Edge, or Firefox browser with microphone permission.
+The web client provides a modern, responsive interface accessible from **any device on your local Wi-Fi network** (smartphones, tablets, and other computers) to execute voice commands to the Raspberry Pi.
 
-1. Start `servers.network_voice_server` on the Pi as described above.
-2. On the laptop, open a second terminal in the project directory.
-3. Serve the browser files instead of opening `index.html` directly:
+It includes a dark-mode glassmorphism design, real-time hardware status indicators, live audio frequency visualizer, and **three intuitive voice execution methods** that eliminate the need to manually click start and stop:
 
-   ```bash
-   cd clients/web
-   python -m http.server 8080
-   ```
+1. **🎙️ Hold-to-Talk (Push-to-Talk, Recommended):**
+   - Press and hold the microphone button (or hold the **Spacebar** on a keyboard) while speaking your command.
+   - Release the button/Spacebar when finished speaking: the audio is immediately encoded to 16 kHz mono 16-bit PCM WAV and sent to the Pi.
+2. **⚡ Auto-Detect (Voice Activity Detection / Hands-Free):**
+   - Tap the microphone button once to enter listening mode.
+   - Speak naturally: the client detects your voice, records the utterance, and automatically stops and dispatches the command as soon as you pause (~0.8s silence, matching the Python client).
+   - An optional **Continuous Listening** toggle in settings keeps listening for further commands.
+3. **⏺️ Tap-to-Toggle (Manual Start/Stop):**
+   - Tap once to begin recording and tap again when done.
+4. **💡 Quick Action Test Chips:**
+   - One-tap buttons for `Light ON`, `Light OFF`, and `Refresh State` for instant testing and manual overrides.
 
-4. Open `http://localhost:8080` in the browser.
-5. Enter the Pi URL, for example `http://192.168.1.50:8765`, and select
-   **Connect**.
-6. Allow microphone access, select **Start recording**, speak a command, and
-   select **Stop recording**.
+### Hosting the Web Client on Your Laptop
 
-The page shows the transcript, action, response, green LED/strip state, relay
-state, and yellow status-LED state. Serving the page from `localhost` is recommended because
-browsers commonly block microphone access from a `file://` page or an
-unsecured remote page.
+You can host the web interface on your laptop so any device on your Wi-Fi network can access it through the laptop's local IP address.
+
+#### Option A: Quick Launch with Windows Batch Script
+Double-click `start_web_client.bat` in the project root, or run:
+
+```bat
+.\start_web_client.bat
+```
+
+#### Option B: Standard HTTP Launch (Desktop Browsers)
+Run the dedicated client web server with the Pi's IP address:
+
+```bash
+python clients/web_server.py --pi http://192.168.1.50:8765
+```
+
+The server automatically detects your laptop's local LAN IP address and prints the exact URLs to open:
+
+```text
+====================================================================
+  [*] VOSK PI VOICE CONTROLLER - LOCAL CLIENT WEB SERVER
+====================================================================
+  * Local Machine:   http://localhost:8080
+  * LAN Network:     http://192.168.1.13:8080
+  * Target Pi Server:http://192.168.1.50:8765
+  * Mode:            LIVE PROXY (Forwarding audio/status to Pi)
+====================================================================
+```
+
+#### Option C: HTTPS Launch (Recommended for Mobile Devices)
+Mobile web browsers (iOS Safari, Android Chrome) enforce a strict security policy requiring a **Secure Context (HTTPS or localhost)** to allow microphone access (`navigator.mediaDevices.getUserMedia`).
+
+To record voice from an iPhone or Android phone over your local network, start the server with `--ssl`:
+
+```bash
+python clients/web_server.py --pi http://192.168.1.50:8765 --ssl
+```
+
+- The server automatically generates a self-signed SSL certificate (`certs/cert.pem` and `certs/key.pem`) on first run.
+- On your phone or tablet, connect to your Wi-Fi and open `https://<laptop-ip>:8443` (e.g. `https://192.168.1.13:8443`).
+- When the browser displays the local self-signed certificate warning, tap **Advanced** &rarr; **Proceed to site**.
+- Microphone access will be fully enabled!
+
+### How the Laptop Reverse Proxy Works
+
+The laptop web server features a built-in reverse proxy at `/api/`:
+- `GET /api/status` &rarr; Proxies to the Pi's `/status` endpoint.
+- `POST /api/audio` &rarr; Proxies raw 16 kHz WAV audio to the Pi's `/audio` endpoint.
+- `POST /api/quick` &rarr; Dispatches sample command WAV audio to the Pi.
+
+**Benefits of the Proxy:**
+- **No Mixed Content Blocks:** Mobile browsers loaded over HTTPS can talk to the HTTP Pi server through the laptop proxy without security errors.
+- **Zero CORS Configuration:** Eliminates cross-origin resource sharing restrictions on mobile clients.
+- **Automatic Connection:** Mobile devices connect to the Pi instantly without having to type the Pi's IP into the client.
+
+### Voice Format Compatibility
+
+The client audio engine strictly honors the Raspberry Pi server's audio format specifications:
+- **Sample Rate:** Downsampled from native browser rates down to **16,000 Hz**.
+- **Channels:** Single-channel mono.
+- **Bit Depth:** 16-bit linear PCM (`Int16`).
+- **Container:** Standard 44-byte RIFF/WAVE header assembly directly in JavaScript.
 
 The server exposes these endpoints:
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/status` | Read the current light and status-LED state |
+| `GET` | `/status` | Read current green LED, relay, and status LED state |
 | `POST` | `/audio` | Submit a mono, 16-bit PCM WAV recording |
 
-Do not expose port 8765 directly to the public internet. The service has no
-login or encryption.
+Do not expose port 8765 or port 8080/8443 directly to the public internet without proper firewall controls.
 
 ## Testing recorded WAV files
 
@@ -502,10 +559,11 @@ server is reachable.
 
 ### The browser cannot use the microphone
 
-Use a current browser, open the page from `http://localhost:8080`, grant
-microphone permission, and avoid opening the HTML file directly with
-`file://`. If the page connects but recording fails, check the browser's site
-permission settings.
+- **Accessing via Localhost:** Open `http://localhost:8080`, grant microphone permission when prompted. Do not open `index.html` via `file://`.
+- **Accessing from Phones/Tablets across Local Network:** Mobile browsers (Safari on iOS, Chrome on Android) prohibit microphone access over plain HTTP when accessed via a network IP.
+  - **Recommended fix:** Run the laptop web server with `--ssl` (`python clients/web_server.py --ssl --pi http://192.168.1.50:8765`), open `https://<laptop-ip>:8443` on your phone, and accept the self-signed certificate.
+  - **Alternative fix (Android Chrome):** In Chrome on your phone, go to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add `http://<laptop-ip>:8080`, enable it, and relaunch Chrome.
+- **Microphone sensitivity:** Open the Settings drawer (gear icon in the top header) and adjust the **Speech Sensitivity** and **Silence Trigger Delay** sliders to match ambient room noise.
 
 ## Safety
 
@@ -526,22 +584,29 @@ permission settings.
 
 ```text
 Vosk_Project/
-├── audio/                         # Sample WAV recordings
+├── audio/                         # Sample WAV recordings (lights_on, lights_off, etc.)
+├── certs/                         # Auto-generated self-signed SSL certs for LAN HTTPS
 ├── clients/
-│   ├── network_voice_client.py    # Laptop microphone client
-│   └── web/                       # Browser client
+│   ├── network_voice_client.py    # Laptop microphone Python client
+│   ├── web_server.py              # Local network web server & reverse proxy
+│   └── web/                       # Modern web client UI
+│       ├── app.js                 # 16kHz WAV encoder, 3 execution modes, visualizer
+│       ├── index.html             # Responsive HUD layout
+│       └── styles.css             # Dark-mode glassmorphism stylesheet
 ├── core/
 │   ├── command_parser.py          # ON/OFF/UNKNOWN command parsing
+│   ├── relay.py                   # Relay module driver
 │   └── transcriber.py             # WAV transcription helper
 ├── examples/
 │   ├── live_microphone_controller.py
 │   └── audio_file_light_controller.py
 ├── servers/
-│   └── network_voice_server.py    # HTTP server for laptop/browser audio
+│   └── network_voice_server.py    # HTTP server for audio recognition & GPIO
 ├── tests/
 │   ├── audio_led_tester.py       # WAV-to-LED test runner
 │   └── voice_transcription_test.py
 ├── vosk-model-small-en-us-0.15/   # Local Vosk speech model
+├── start_web_client.bat           # 1-click Windows launcher for web client
 └── README.md
 ```
 
