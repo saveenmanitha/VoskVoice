@@ -29,6 +29,9 @@ if [ "$choice" = "3" ]; then
     exit 0
 fi
 
+echo ""
+echo "Tip: For fastest network response without mDNS resolution lag,"
+echo "     enter your Pi's static LAN IP address (e.g. 192.168.1.50)."
 read -rp "Enter Pi IP or hostname [default: raspberrypi.local]: " pi_ip
 pi_ip="${pi_ip:-raspberrypi.local}"
 

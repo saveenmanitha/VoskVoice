@@ -25,6 +25,9 @@ if "%choice%"=="3" (
     exit /b
 )
 
+echo.
+echo Tip: For fastest network response without mDNS resolution lag,
+echo      enter your Pi's static LAN IP address (e.g. 192.168.1.50).
 set /p pi_ip="Enter Pi IP address or hostname [default: raspberrypi.local]: "
 if "%pi_ip%"=="" set pi_ip=raspberrypi.local
 if not "%pi_ip:~0,4%"=="http" set pi_ip=http://%pi_ip%:8765

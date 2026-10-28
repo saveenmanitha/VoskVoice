@@ -20,11 +20,37 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler
+try:
+    from http.server import ThreadingHTTPServer
+except ImportError:
+    from socketserver import ThreadingMixIn
+    from http.server import HTTPServer
+
+    class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
 from pathlib import Path
 from typing import Optional
+
+
+class ThreadedWebClientServer(ThreadingHTTPServer):
+    """Multi-threaded HTTP server with TCP_NODELAY and immediate connection handling."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except (OSError, AttributeError):
+            pass
+        return sock, addr
+
 
 if sys.stdout.encoding != "utf-8":
     try:
@@ -301,8 +327,28 @@ def create_request_handler(
         return entry
 
     class WebClientRequestHandler(SimpleHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(web_dir), **kwargs)
+
+        def address_string(self) -> str:
+            """Return the client IP directly without triggering slow reverse DNS lookups.
+
+            Standard BaseHTTPRequestHandler invokes socket.getfqdn(), which causes
+            3-10 second stalls on local network IP addresses due to DNS PTR timeouts.
+            """
+            return self.client_address[0]
+
+        def _get_client_ip(self) -> str:
+            """Extract true client IP address from socket or forwarded headers."""
+            forwarded = self.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            real_ip = self.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
+            return self.client_address[0]
 
         def _send_cors_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -310,69 +356,105 @@ def create_request_handler(
                 "Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, PUT"
             )
             self.send_header(
-                "Access-Control-Allow-Headers", "Content-Type, X-Requested-With"
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-Requested-With, X-Forwarded-For, X-Real-IP",
             )
+
+        def end_headers(self) -> None:
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if clean_path.startswith("/api"):
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            else:
+                if clean_path.endswith((".css", ".js", ".png", ".svg", ".ico", ".woff2")):
+                    self.send_header("Cache-Control", "public, max-age=3600, must-revalidate")
+                else:
+                    self.send_header("Cache-Control", "no-cache")
+            self._send_cors_headers()
+            super().end_headers()
 
         def _send_json_response(self, data: object, status: int = 200) -> None:
             payload = json.dumps(data).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
-            self._send_cors_headers()
             self.end_headers()
             self.wfile.write(payload)
 
         def do_OPTIONS(self) -> None:
             self.send_response(204)
-            self._send_cors_headers()
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def do_GET(self) -> None:
-            if self.path == "/api/status":
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if clean_path in ("/api/status", "/status"):
                 self._handle_get_status()
                 return
-            elif self.path == "/api/config":
+            elif clean_path in ("/api/config", "/config"):
                 self._handle_get_config()
                 return
-            elif self.path == "/api/history":
+            elif clean_path in ("/api/history", "/history"):
                 self._handle_get_history()
                 return
-            elif self.path == "/api/commands":
+            elif clean_path in ("/api/commands", "/commands"):
                 from core.command_parser import get_command_examples
                 self._send_json_response(get_command_examples())
                 return
+
+            if clean_path == "/diagnostics":
+                self.path = "/diagnostics.html"
+            elif clean_path == "/help":
+                self.path = "/help.html"
 
             # Default to serving static files from clients/web
             super().do_GET()
 
         def do_DELETE(self) -> None:
-            if self.path == "/api/history":
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if clean_path in ("/api/history", "/history"):
                 server_history.clear()
                 if mock_state:
                     mock_state.history.clear()
+
+                # If proxying to a live Raspberry Pi, also clear history on the Pi server
+                if not mock_mode and current_pi_url[0]:
+                    try:
+                        client_ip = self._get_client_ip()
+                        del_req = urllib.request.Request(
+                            f"{current_pi_url[0]}/history",
+                            headers={
+                                "X-Forwarded-For": client_ip,
+                                "X-Real-IP": client_ip,
+                            },
+                            method="DELETE",
+                        )
+                        with urllib.request.urlopen(del_req, timeout=3) as _:
+                            pass
+                    except Exception:
+                        pass
+
                 self._send_json_response({"success": True, "message": "History cleared"})
                 return
             self.send_error(404, "Endpoint not found")
 
         def do_POST(self) -> None:
-            client_ip = self.client_address[0]
-            if self.path == "/api/audio":
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            client_ip = self._get_client_ip()
+
+            if clean_path in ("/api/audio", "/audio"):
                 self._handle_post_audio(client_ip)
                 return
-            elif self.path == "/api/recording":
+            elif clean_path in ("/api/recording", "/recording"):
                 self._handle_post_recording(client_ip)
                 return
-            elif self.path == "/api/control":
+            elif clean_path in ("/api/control", "/control", "/api/quick", "/quick"):
                 self._handle_post_control(client_ip)
                 return
-            elif self.path == "/api/gpio":
+            elif clean_path in ("/api/gpio", "/gpio"):
                 self._handle_post_gpio(client_ip)
                 return
-            elif self.path == "/api/config":
+            elif clean_path in ("/api/config", "/config"):
                 self._handle_post_config()
-                return
-            elif self.path == "/api/quick":
-                self._handle_post_control(client_ip)
                 return
 
             self.send_error(404, "Endpoint not found")
@@ -385,7 +467,7 @@ def create_request_handler(
             url = f"{current_pi_url[0]}/status"
             req = urllib.request.Request(url, method="GET")
             try:
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=3) as response:
                     body = response.read()
                     data = json.loads(body.decode("utf-8"))
                     self._send_json_response(data, status=response.status)
@@ -467,7 +549,11 @@ def create_request_handler(
             req = urllib.request.Request(
                 url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": client_ip,
+                    "X-Real-IP": client_ip,
+                },
                 method="POST",
             )
             try:
@@ -499,7 +585,11 @@ def create_request_handler(
             req = urllib.request.Request(
                 url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": client_ip,
+                    "X-Real-IP": client_ip,
+                },
                 method="POST",
             )
             try:
@@ -541,7 +631,11 @@ def create_request_handler(
             req = urllib.request.Request(
                 url,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": client_ip,
+                    "X-Real-IP": client_ip,
+                },
                 method="POST",
             )
             try:
@@ -589,7 +683,11 @@ def create_request_handler(
             req = urllib.request.Request(
                 url,
                 data=audio_bytes,
-                headers={"Content-Type": "audio/wav"},
+                headers={
+                    "Content-Type": "audio/wav",
+                    "X-Forwarded-For": client_ip,
+                    "X-Real-IP": client_ip,
+                },
                 method="POST",
             )
             try:
@@ -725,7 +823,7 @@ def main() -> int:
     )
 
     try:
-        httpd = HTTPServer((args.host, port), handler_class)
+        httpd = ThreadedWebClientServer((args.host, port), handler_class)
     except OSError as err:
         print(f"[ERROR] Failed to bind to {args.host}:{port}: {err}", file=sys.stderr)
         return 1

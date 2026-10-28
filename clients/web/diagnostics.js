@@ -38,6 +38,7 @@
 
   let isConnected = false;
   let useProxy = true; // Default to laptop proxy
+  let isClearingHistory = false;
   let serverBaseUrl = localStorage.getItem("voskPiServerUrl") || "http://raspberrypi.local:8765";
   let isCycling = false;
 
@@ -137,12 +138,23 @@
     }
   }
 
+  function formatClientIp(ip) {
+    if (!ip) return "Local Device";
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
+      return "Host PC";
+    }
+    return ip;
+  }
+
   async function pollHistory() {
+    if (isClearingHistory) return;
     try {
       const res = await fetch(getApiEndpoint("/history"), { signal: AbortSignal.timeout(3000) });
-      if (res.ok) {
+      if (res.ok && !isClearingHistory) {
         const history = await res.json();
-        renderHistory(history);
+        if (!isClearingHistory) {
+          renderHistory(history);
+        }
       }
     } catch (_) {}
   }
@@ -169,9 +181,9 @@
       return `
         <li class="history-item">
           <div class="history-item-left">
-            <span class="ip-badge" title="Source Device IP">
+            <span class="ip-badge" title="Source Device IP: ${item.client_ip || 'Local Device'}">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-              ${item.client_ip || "Local Device"}
+              ${formatClientIp(item.client_ip)}
             </span>
             <span class="type-badge ${typeClass}">${typeLabel}</span>
             <span class="action-badge ${cmdClass}" style="font-size:0.72rem; padding: 2px 7px;">${item.command}</span>
@@ -253,10 +265,20 @@
 
   // Clear History
   clearHistoryBtn.addEventListener("click", async () => {
+    isClearingHistory = true;
+    renderHistory([]);
     try {
-      await fetch(getApiEndpoint("/history"), { method: "DELETE" });
-      renderHistory([]);
-    } catch (_) {}
+      await fetch(getApiEndpoint("/history"), {
+        method: "DELETE",
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (err) {
+      console.warn("Could not clear history on server:", err);
+    } finally {
+      setTimeout(() => {
+        isClearingHistory = false;
+      }, 1000);
+    }
   });
 
   // Initial connect & poll loops

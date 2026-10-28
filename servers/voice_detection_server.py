@@ -8,14 +8,32 @@ GPIO signals for instant controls, hardware diagnostics, and multi-client activi
 import argparse
 import json
 import os
+import socket
 import sys
 import time
+import urllib.parse
 import wave
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
+
+
+class ThreadedVoiceServer(ThreadingHTTPServer):
+    """Multi-threaded voice detection server with TCP_NODELAY enabled."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except (OSError, AttributeError):
+            pass
+        return sock, addr
+
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -243,6 +261,22 @@ def make_handler(controller: VoiceCommandServer):
     """Factory creating the HTTP request handler bound to the controller instance."""
 
     class RequestHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def address_string(self) -> str:
+            """Avoid slow reverse DNS lookups on LAN client IP addresses."""
+            return self.client_address[0]
+
+        def _get_client_ip(self) -> str:
+            """Retrieve the true originating client IP address, supporting forward proxies."""
+            forwarded = self.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            real_ip = self.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
+            return self.client_address[0]
+
         def _send_json(self, result: object, status: int = 200) -> None:
             response = json.dumps(result).encode("utf-8")
             self.send_response(status)
@@ -251,8 +285,10 @@ def make_handler(controller: VoiceCommandServer):
                 "Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"
             )
             self.send_header(
-                "Access-Control-Allow-Headers", "Content-Type, X-Requested-With"
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-Requested-With, X-Forwarded-For, X-Real-IP",
             )
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(response)))
             self.end_headers()
@@ -265,29 +301,34 @@ def make_handler(controller: VoiceCommandServer):
                 "Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"
             )
             self.send_header(
-                "Access-Control-Allow-Headers", "Content-Type, X-Requested-With"
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-Requested-With, X-Forwarded-For, X-Real-IP",
             )
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def do_GET(self) -> None:
-            if self.path == "/status":
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if clean_path in ("/status", "/api/status"):
                 self._send_json(controller.status())
-            elif self.path == "/history":
+            elif clean_path in ("/history", "/api/history"):
                 self._send_json(controller.get_history())
-            elif self.path == "/commands":
+            elif clean_path in ("/commands", "/api/commands"):
                 self._send_json(get_command_examples())
             else:
                 self.send_error(404, "Unknown GET endpoint")
 
         def do_DELETE(self) -> None:
-            if self.path == "/history":
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            if clean_path in ("/history", "/api/history"):
                 controller.clear_history()
                 self._send_json({"success": True, "message": "History cleared"})
             else:
                 self.send_error(404, "Unknown DELETE endpoint")
 
         def do_POST(self) -> None:
-            client_ip = self.client_address[0]
+            clean_path = urllib.parse.urlparse(self.path).path.rstrip("/")
+            client_ip = self._get_client_ip()
             content_length_header = self.headers.get("Content-Length")
             try:
                 content_length = int(content_length_header or "0")
@@ -295,7 +336,7 @@ def make_handler(controller: VoiceCommandServer):
                 self.send_error(400, "Content-Length must be an integer")
                 return
 
-            if self.path == "/recording":
+            if clean_path in ("/recording", "/api/recording"):
                 # Voice recording state toggle (drives Red LED recording tally)
                 try:
                     payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length > 0 else {}
@@ -313,7 +354,7 @@ def make_handler(controller: VoiceCommandServer):
                     self.send_error(400, f"Recording state error: {error}")
                 return
 
-            elif self.path == "/audio":
+            elif clean_path in ("/audio", "/api/audio"):
                 if content_length <= 0 or content_length > controller.max_audio_bytes:
                     controller.leds.stop_recording()
                     controller.leds.system_error_alert()
@@ -338,7 +379,7 @@ def make_handler(controller: VoiceCommandServer):
                 )
                 return
 
-            elif self.path == "/control":
+            elif clean_path in ("/control", "/api/control", "/quick", "/api/quick"):
                 # Pure direct GPIO command (bypasses Vosk speech recognition)
                 try:
                     payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
@@ -353,7 +394,7 @@ def make_handler(controller: VoiceCommandServer):
                     self.send_error(400, f"Control error: {error}")
                 return
 
-            elif self.path == "/gpio":
+            elif clean_path in ("/gpio", "/api/gpio"):
                 # Individual pin test toggle or dynamic pattern test
                 try:
                     payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
@@ -446,7 +487,7 @@ def print_server_banner(host: str, port: int, model_path: str, args: argparse.Na
 def main() -> int:
     arguments = parse_arguments()
     controller: Optional[VoiceCommandServer] = None
-    server: Optional[ThreadingHTTPServer] = None
+    server: Optional[ThreadedVoiceServer] = None
     try:
         # Dynamically discover model path across any project location
         model_path = resolve_model_path(arguments.model)
@@ -460,7 +501,7 @@ def main() -> int:
             relay_pin=arguments.relay_pin,
             active_low=arguments.active_low,
         )
-        server = ThreadingHTTPServer(
+        server = ThreadedVoiceServer(
             (arguments.host, arguments.port), make_handler(controller)
         )
         print_server_banner(arguments.host, arguments.port, model_path, arguments)

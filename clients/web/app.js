@@ -89,6 +89,7 @@
   let currentMode = "ptt"; // "ptt" | "vad" | "toggle"
   let isConnected = false;
   let useProxy = false;
+  let isClearingHistory = false;
   let serverBaseUrl = localStorage.getItem("voskPiServerUrl") || serverInput.value;
   let vadThreshold = parseFloat(vadThresholdInput.value) || 0.03;
   let silenceDuration = parseFloat(silenceDelayInput.value) || 0.8;
@@ -258,12 +259,23 @@
    * Multi-Device Activity Log
    * Receives commands executed across all connected phones and computers with their IP tags.
    */
+  function formatClientIp(ip) {
+    if (!ip) return "Local Device";
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
+      return "Host PC";
+    }
+    return ip;
+  }
+
   async function pollMultiDeviceHistory() {
+    if (isClearingHistory) return;
     try {
       const res = await fetch(getApiEndpoint("/history"), { signal: AbortSignal.timeout(2500) });
-      if (res.ok) {
+      if (res.ok && !isClearingHistory) {
         const items = await res.json();
-        renderMultiDeviceHistory(items);
+        if (!isClearingHistory) {
+          renderMultiDeviceHistory(items);
+        }
       }
     } catch (_) {}
   }
@@ -290,9 +302,9 @@
       return `
         <li class="history-item">
           <div class="history-item-left">
-            <span class="ip-badge" title="Source Device IP">
+            <span class="ip-badge" title="Source Device IP: ${item.client_ip || 'Local Device'}">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-              ${item.client_ip || "Local Device"}
+              ${formatClientIp(item.client_ip)}
             </span>
             <span class="type-badge ${typeClass}">${typeLabel}</span>
             <span class="action-badge ${cmdClass}" style="font-size:0.72rem; padding: 2px 7px;">${item.command}</span>
@@ -643,11 +655,20 @@
     connectionLabel.textContent = "Connecting...";
 
     try {
-      const proxyCheck = await fetch("/api/status", { signal: AbortSignal.timeout(2500) });
+      const proxyCheck = await fetch("/api/status", { signal: AbortSignal.timeout(3500) });
       if (proxyCheck.ok) {
         useProxy = true;
         const data = await proxyCheck.json();
         handleSuccessfulConnection(data, "Connected via Laptop Proxy");
+        return;
+      } else if (proxyCheck.status === 502) {
+        useProxy = true;
+        const data = await proxyCheck.json().catch(() => ({}));
+        connectionPill.className = "connection-pill connecting";
+        connectionLabel.textContent = "Proxy Ready (Waiting for Pi)";
+        showError(data.error || "Web server proxy ready; connecting to Raspberry Pi...");
+        if (!statusPollInterval) statusPollInterval = setInterval(pollServerStatus, 3500);
+        if (!historyPollInterval) historyPollInterval = setInterval(pollMultiDeviceHistory, 2000);
         return;
       }
     } catch (_) {
@@ -875,10 +896,20 @@
 
     dismissErrorBtn.addEventListener("click", () => showError(""));
     clearHistoryBtn.addEventListener("click", async () => {
+      isClearingHistory = true;
+      renderMultiDeviceHistory([]);
       try {
-        await fetch(getApiEndpoint("/history"), { method: "DELETE" });
-        renderMultiDeviceHistory([]);
-      } catch (_) {}
+        await fetch(getApiEndpoint("/history"), {
+          method: "DELETE",
+          signal: AbortSignal.timeout(3000),
+        });
+      } catch (err) {
+        console.warn("Could not clear history on server:", err);
+      } finally {
+        setTimeout(() => {
+          isClearingHistory = false;
+        }, 1000);
+      }
     });
 
     // Help Modal Window Handlers
