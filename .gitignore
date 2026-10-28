@@ -20,3 +20,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Distribution and release archives
+dist/
+build/
+*.zip
+*.tar.gz

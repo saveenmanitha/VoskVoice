@@ -1,0 +1,18 @@
+# ==============================================================================
+# Offline Voice-Controlled Light & Appliance System Requirements
+# Compatible with Python 3.9+
+# ==============================================================================
+
+# --- Raspberry Pi Voice Server Dependencies ---
+# Vosk Offline Speech Recognition API (Kaldi STT)
+vosk>=0.3.45
+
+# Raspberry Pi GPIO Zero Library
+# Automatically falls back to mock hardware mode on non-Pi platforms
+gpiozero>=2.0
+
+# --- Web Client Server Dependencies ---
+# The Client Web Server (clients/client_web_server.py) is implemented using
+# standard Python library modules (http.server, urllib, ssl, socket, etc.).
+# No external third-party pip packages are required to run the Web Client!
+
