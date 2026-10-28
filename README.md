@@ -14,16 +14,12 @@ No external cloud APIs, no subscriptions, and zero audio ever leaves your privat
 
 ---
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 1: HERO DEMO GIF / VIDEO BANNER                       -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/demo_hero.gif">
     <img src="docs/images/demo_hero.gif" alt="Offline Voice Control System in Action" width="850">
   </a>
   <p>
-    <em>🎥 <b>Media Placeholder:</b> <code>docs/images/demo_hero.gif</code><br>
-    <b>Suggested content:</b> Animated GIF showing end-to-end voice control in action &mdash; user speaking "Turn on the light" into the web interface, the audio waveform reacting, and the physical Raspberry Pi relay and green LED switching on.</em>
+    <em>🎥 End-to-end voice control: speak a command in the web interface, watch the audio waveform react, and see the Raspberry Pi relay and green LED switch on.</em>
   </p>
 </div>
 
@@ -35,7 +31,9 @@ No external cloud APIs, no subscriptions, and zero audio ever leaves your privat
 - [System Architecture](#-system-architecture)
 - [Web Client Interface Tour](#-web-client-interface-tour)
 - [Raspberry Pi Voice Server](#-raspberry-pi-voice-server)
+- [Windows Web Server Launcher](#-windows-web-server-launcher)
 - [Hardware Wiring & Circuit Diagram](#-hardware-wiring--circuit-diagram)
+- [Hardware Setup](#-hardware-setup)
 - [Voice Commands & Phonetic Matcher](#-voice-commands--phonetic-matcher)
 - [Software Prerequisites & Installation](#-software-prerequisites--installation)
 - [Dynamic Vosk Model Auto-Discovery](#-dynamic-vosk-model-auto-discovery)
@@ -48,7 +46,6 @@ No external cloud APIs, no subscriptions, and zero audio ever leaves your privat
 - [Standalone Raspberry Pi USB Microphone Mode](#-standalone-raspberry-pi-usb-microphone-mode)
 - [Project Directory Structure](#-project-directory-structure)
 - [Troubleshooting & FAQ](#-troubleshooting--faq)
-- [Media & Diagram Asset Checklist](#-media--diagram-asset-checklist)
 - [Safety & Electrical Guidelines](#-safety--electrical-guidelines)
 - [License](#-license)
 
@@ -75,18 +72,78 @@ No external cloud APIs, no subscriptions, and zero audio ever leaves your privat
 
 ## 🏛️ System Architecture
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 2: SYSTEM ARCHITECTURE DIAGRAM                        -->
-<!-- ================================================================= -->
-<div align="center">
-  <a href="docs/images/system_architecture.png">
-    <img src="docs/images/system_architecture.png" alt="System Architecture Diagram" width="850">
-  </a>
-  <p>
-    <em>📐 <b>Diagram Placeholder:</b> <code>docs/images/system_architecture.png</code><br>
-    <b>Suggested content:</b> High-level block diagram showing the flow of audio from Web Audio API / Mobile Browser &rarr; Client Web Server (Reverse Proxy) &rarr; LAN HTTP POST &rarr; Raspberry Pi Voice Detection Server &rarr; Vosk STT Engine &rarr; Command Parser &rarr; GPIO Zero Pin Controller.</em>
-  </p>
-</div>
+```mermaid
+graph TD
+    classDef client fill:#0d2c40,stroke:#00d2ff,stroke-width:2px,color:#fff;
+    classDef server fill:#12253a,stroke:#0094ff,stroke-width:2px,color:#fff;
+    classDef backend fill:#112d24,stroke:#00ff9d,stroke-width:2px,color:#fff;
+    classDef ext fill:#1f132e,stroke:#9d00ff,stroke-width:2px,color:#fff;
+    classDef hardware fill:#2d1717,stroke:#ff3366,stroke-width:2px,color:#fff;
+
+    subgraph LAN_Device["Client Device (Laptop / PC / Mobile)"]
+        direction TB
+        Client["Browser Interface"]
+        Client --- WebAudio["Web Audio API - 16 kHz WAV"]
+        Client --- Waveform["Waveform Visualizer"]
+        Client --- VAD["VAD and Silence Detection"]
+    end
+    class LAN_Device client;
+
+    subgraph Proxy_Server["Client Web Server and LAN Proxy"]
+        direction TB
+        Proxy["client_web_server.py - ports 8080 / 8443"]
+        Proxy --- Static["Static Assets - HTML/CSS/JS"]
+        Proxy --- SSL["SSL / TLS Encryption"]
+        Proxy --- Reverse["API Reverse Proxy"]
+    end
+    class Proxy_Server server;
+
+    subgraph Raspberry_Pi["Raspberry Pi Voice Server - port 8765"]
+        direction TB
+        APIs["Voice Detection Server"]
+        AudioAPI["/audio - PCM Audio"]
+        CtrlAPI["/control - Direct Bypass"]
+        PollAPI["/status - Pin States"]
+        HistAPI["/history - Activity Log"]
+
+        APIs --> AudioAPI
+        APIs --> CtrlAPI
+        APIs --> PollAPI
+        APIs --> HistAPI
+    end
+    class Raspberry_Pi backend;
+
+    subgraph Speech_Process["Offline Engine and Parsing"]
+        direction TB
+        Vosk["Vosk Kaldi Engine"] --- STT["Offline Speech-to-Text"]
+        Parser["Command Parser"] --- Synonym["Phonetic Matcher and Aliases"]
+    end
+    class Speech_Process ext;
+
+    subgraph Physical_IO["GPIO Hardware Controller"]
+        direction TB
+        GPIO["Raspberry Pi GPIO BCM Pins"]
+        LED_G["BCM 22 - Green Command LED"]
+        Relay["BCM 23 - 12V Relay"]
+        LED_Y["BCM 27 - Status/Warn LED"]
+        LED_R["BCM 17 - Recording LED"]
+
+        GPIO --> LED_G
+        GPIO --> Relay
+        GPIO --> LED_Y
+        GPIO --> LED_R
+    end
+    class Physical_IO hardware;
+
+    Client ==>|"HTTP POST - Audio WAV or Action"| Proxy
+    Proxy ==>|"LAN HTTP - port 8765"| APIs
+
+    AudioAPI ==> Vosk
+    CtrlAPI ==> Parser
+
+    Vosk ==> Parser
+    Parser ==> GPIO
+```
 
 ### Data & Audio Flow Pipeline
 
@@ -142,16 +199,12 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 
 ### 1. Main Voice Controller Dashboard (`/index.html`)
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 3: CLIENT WEB SERVER MAIN DASHBOARD SCREENSHOT        -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/web_interface_main.gif">
     <img src="docs/images/web_interface_main.gif" alt="Client Web Server Dashboard" width="850">
   </a>
   <p>
-    <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_interface_main.png</code><br>
-    <b>Suggested content:</b> Full browser screenshot of the primary dashboard at <code>/index.html</code> displaying the animated microphone button, live audio waveform visualizer, Hardware Status HUD (Green, Relay, Yellow, Red indicators), Direct GPIO Quick Action buttons, and the real-time activity feed.</em>
+    <em>📸 Main voice controller dashboard with the microphone control, live waveform, hardware status indicators, GPIO quick actions, and activity feed.</em>
   </p>
 </div>
 
@@ -165,16 +218,12 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 
 ### 2. Hardware Diagnostics Suite (`/diagnostics.html`)
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 4: HARDWARE DIAGNOSTICS SUITE SCREENSHOT              -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/web_diagnostics.gif">
     <img src="docs/images/web_diagnostics.gif" alt="Hardware Diagnostics Interface" width="850">
   </a>
   <p>
-    <em>📸 <b>Screenshot Placeholder:</b> <code>docs/images/web_diagnostics.png</code><br>
-    <b>Suggested content:</b> Screenshot of the Diagnostics dashboard at <code>/diagnostics.html</code> showing independent pin toggle cards for BCM 22, BCM 23, BCM 27, and BCM 17, along with the "Test Pulse" and "Turn All ON / OFF" master controls.</em>
+    <em>📸 Hardware diagnostics dashboard for testing individual GPIO pins, pulse output, and master on/off controls.</em>
   </p>
 </div>
 
@@ -186,16 +235,12 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 
 ### 3. Mobile Device Interface (Responsive & HTTPS)
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 5: MOBILE RESPONSIVE VIEW OVER HTTPS                  -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/mobile_interface.gif">
     <img src="docs/images/mobile_interface.gif" alt="Mobile Web Interface over HTTPS" width="450">
   </a>
   <p>
-    <em>📱 <b>Screenshot Placeholder:</b> <code>docs/images/mobile_interface.png</code><br>
-    <b>Suggested content:</b> Screenshot of the web client running on a mobile browser (iPhone Safari or Android Chrome) over LAN HTTPS (port 8443) demonstrating the responsive mobile layout and active microphone permission.</em>
+    <em>📱 Responsive web client running over LAN HTTPS with mobile microphone access enabled.</em>
   </p>
 </div>
 
@@ -205,16 +250,12 @@ The Client Web Server provides an intuitive, responsive glassmorphism interface 
 
 The backend runs on the Raspberry Pi as a lightweight HTTP micro-service listening on port `8765`. It handles audio transcription, executes phonetic matching, interacts with the GPIO controller, and broadcasts status updates.
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 6: RASPBERRY PI VOICE SERVER TERMINAL CONSOLE         -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/voice_server_terminal.gif">
     <img src="docs/images/voice_server_terminal.gif" alt="Raspberry Pi Voice Server Terminal Output" width="850">
   </a>
   <p>
-    <em>💻 <b>Screenshot Placeholder:</b> <code>docs/images/voice_server_terminal.png</code><br>
-    <b>Suggested content:</b> Terminal capture of <code>servers/voice_detection_server.py</code> executing on the Raspberry Pi: showing dynamic model resolution, server startup on <code>0.0.0.0:8765</code>, audio receipt from client IP, Vosk recognition output, command parsing, and GPIO pin actuation logs.</em>
+    <em>💻 Raspberry Pi voice server terminal showing model discovery, startup, audio processing, speech recognition, command parsing, and GPIO activity.</em>
   </p>
 </div>
 
@@ -229,35 +270,64 @@ The backend runs on the Raspberry Pi as a lightweight HTTP micro-service listeni
 
 ---
 
+## 🪟 Windows Web Server Launcher
+
+The [`start_web_client.bat`](start_web_client.bat) file provides a simple Windows launcher for the Client Web Server. Double-click it to choose how the web client should run, without needing to type the full Python command manually.
+
+The launcher supports three modes:
+
+- **HTTP mode:** Starts the web client on port `8080` and connects to the Raspberry Pi voice server at the hostname or IP address you provide.
+- **HTTPS mode:** Starts the web client on port `8443` with the local self-signed certificate, enabling microphone access from mobile browsers on the same LAN.
+- **Mock mode:** Starts the web client with a simulated Raspberry Pi backend so the interface and controls can be tested without physical hardware.
+
+You can also pass arguments directly from a Command Prompt:
+
+```bat
+start_web_client.bat --pi http://<RASPBERRY_PI_IP>:8765
+start_web_client.bat --pi http://<RASPBERRY_PI_IP>:8765 --ssl
+start_web_client.bat --mock-pi
+```
+
+<div align="center">
+  <a href="docs/images/web_client_server.gif">
+    <img src="docs/images/web_client_server.gif" alt="Windows Web Client Server Launcher" width="850">
+  </a>
+  <p>
+    <em>🎬 Launching <code>start_web_client.bat</code>, selecting a server mode, connecting to the Raspberry Pi, and using the web client controls.</em>
+  </p>
+</div>
+
+---
+
 ## 🔌 Hardware Wiring & Circuit Diagram
 
 The Raspberry Pi drives three status LEDs and an optocoupled relay module configured to control an external 12V DC power circuit.
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 7: CIRCUIT WIRING DIAGRAM (FRITZING / SCHEMATIC)      -->
-<!-- ================================================================= -->
 <div align="center">
   <a href="docs/images/circuit_wiring_diagram.png">
     <img src="docs/images/circuit_wiring_diagram.png" alt="Circuit Wiring Diagram" width="850">
   </a>
   <p>
-    <em>⚡ <b>Diagram Placeholder:</b> <code>docs/images/circuit_wiring_diagram.png</code><br>
-    <b>Suggested content:</b> Detailed Fritzing breadboard illustration or electronic schematic diagram showing connections between the Raspberry Pi 40-pin header, 220Ω/330Ω current-limiting resistors, Green/Yellow/Red LEDs, Relay module input, 12V external power supply, and 12V LED light strip.</em>
+    <em>⚡ Circuit wiring diagram showing the Raspberry Pi GPIO connections, status LEDs, relay module, external 12V supply, and light strip.</em>
   </p>
 </div>
 
-<!-- ================================================================= -->
-<!-- PLACEHOLDER 8: PHYSICAL HARDWARE BENCH SETUP PHOTO               -->
-<!-- ================================================================= -->
+---
+
+## 🧰 Hardware Setup
+
+The complete hardware setup used for this project is shown below, including the Raspberry Pi, relay module, status LEDs, resistors, wiring, power supply, and connected light source.
+
 <div align="center">
   <a href="docs/images/hardware_setup_photo.png">
-    <img src="docs/images/hardware_setup_photo.png" alt="Physical Hardware Setup Photo" width="850">
+    <img src="docs/images/hardware_setup_photo.png" alt="Complete Raspberry Pi Voice Control Hardware Setup" width="850">
   </a>
   <p>
-    <em>📷 <b>Photo Placeholder:</b> <code>docs/images/hardware_setup_photo.png</code><br>
-    <b>Suggested content:</b> High-resolution photograph of the actual physical hardware assembly on a breadboard or custom project enclosure, showing the Raspberry Pi, relay board, wiring jumpers, status LEDs, and light strip.</em>
+    <em>📷 Complete hardware setup for the Raspberry Pi voice-controlled light and appliance system.</em>
   </p>
 </div>
+
+---
 
 ### GPIO Pinout Reference Table
 
@@ -353,7 +423,7 @@ SSH into your Raspberry Pi and start the voice server:
 
 ```bash
 cd Vosk_Project
-./start_voice_server.sh
+bash ./start_voice_server.sh
 ```
 
 Or execute directly with Python:
@@ -553,23 +623,6 @@ Vosk_Project/
 - **Microphone Placement:** Speak clearly within 15–30 cm of your microphone.
 - **Background Noise:** Use the Push-to-Talk mode to minimize ambient sound pickup.
 - **Alternative Vosk Models:** For higher accuracy (requiring ~1 GB RAM), you can download the larger `vosk-model-en-us-0.22` model and place it in the project root.
-
----
-
-## 🖼️ Media & Diagram Asset Checklist
-
-This checklist summarizes all visual placeholders throughout this documentation. When adding your media files, simply drop the corresponding file into `docs/images/` using the specified filename:
-
-| # | File Path | Type | Recommended Resolution / Specs | Section in README | What to Capture |
-|---|---|---|---|---|---|
-| **1** | `docs/images/demo_hero.gif` | Animated GIF / Video | `850×480` or `1280×720` (15–20 fps, optimized) | [Header Demo](#offline-voice-controlled-light--appliance-system-for-raspberry-pi) | End-to-end demo of user speaking into web UI and the physical LED/relay activating |
-| **2** | `docs/images/system_architecture.png` | Graphic / Diagram | `1920×1080` (PNG or SVG) | [System Architecture](#-system-architecture) | Visual architecture block diagram of client, proxy, Pi server, Vosk, and GPIO pins |
-| **3** | `docs/images/web_interface_main.png` | Screenshot | `1920×1080` or `1280×720` (PNG) | [Web Client Tour](#1-main-voice-controller-dashboard-indexhtml) | Main dashboard at `/index.html` with active waveform, buttons, and HUD status lights |
-| **4** | `docs/images/web_diagnostics.png` | Screenshot | `1920×1080` or `1280×720` (PNG) | [Web Client Tour](#2-hardware-diagnostics-suite-diagnosticshtml) | Pin diagnostics suite at `/diagnostics.html` showing individual toggle controls and pulse test |
-| **5** | `docs/images/mobile_interface.png` | Screenshot | `1080×1920` or `750×1334` (Mobile Portrait PNG) | [Web Client Tour](#3-mobile-device-interface-responsive--https) | Mobile browser view running over HTTPS with microphone active |
-| **6** | `docs/images/voice_server_terminal.png` | Screenshot | `1400×900` or terminal capture (PNG) | [Raspberry Pi Voice Server](#-raspberry-pi-voice-server) | Terminal showing server startup, dynamic model detection, audio receipt, and GPIO logs |
-| **7** | `docs/images/circuit_wiring_diagram.png` | Schematic / Graphic | `1920×1080` (PNG or SVG) | [Hardware Wiring](#-hardware-wiring--circuit-diagram) | Fritzing or schematic diagram showing Raspberry Pi, LEDs, resistors, relay, 12V supply, and light strip |
-| **8** | `docs/images/hardware_setup_photo.png` | Photo | `1920×1080` (High-res JPG / PNG) | [Hardware Wiring](#-hardware-wiring--circuit-diagram) | Physical workbench photo of the assembled Raspberry Pi, breadboard, relay, and LEDs |
 
 ---
 
